@@ -1,0 +1,16 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThermalCamera", "ThermalCamera.csproj", "{983EB0A0-F348-47FD-BC44-D56747006DBF}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{983EB0A0-F348-47FD-BC44-D56747006DBF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{983EB0A0-F348-47FD-BC44-D56747006DBF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{983EB0A0-F348-47FD-BC44-D56747006DBF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{983EB0A0-F348-47FD-BC44-D56747006DBF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
