@@ -1,8 +1,9 @@
 ﻿using System.Device.I2c;
+using System.Text;
 
 namespace ThermalCamera;
 
-public class ThermalCamera
+public sealed class ThermalCamera : IDisposable
 {
     private static readonly I2cDevice Device = I2cBus.Create(1).CreateDevice(0x33);
     private readonly ParamsMlx _mlx;
@@ -24,25 +25,26 @@ public class ThermalCamera
     {
         _mlx = new ParamsMlx();
 
-        var eepromData = new ushort[832];
-        ReadWordsFromRegister(EePromStartAddress, eepromData);
+        // var eepromData = new ushort[832];
+        // ReadWordsFromRegister(EePromStartAddress, eepromData);
+        //
+        // ExtractVddParameters(eepromData);
+        // ExtractPtatParameters(eepromData);
+        // ExtractGainParameters(eepromData);
+        // ExtractTgcParameters(eepromData);
+        // ExtractResolutionParameters(eepromData);
+        // ExtractKsTaParameters(eepromData);
+        // ExtractKsToParameters(eepromData);
+        // ExtractAlphaParameters(eepromData);
+        // ExtractOffsetParameters(eepromData);
+        // ExtractKtaPixelParameters(eepromData);
+        // ExtractKvPixelParameters(eepromData);
+        // ExtractCpParameters(eepromData);
+        // ExtractCilcParameters(eepromData);
+        // ExtractDeviatingPixels(eepromData);
 
-        ExtractVddParameters(eepromData);
-        ExtractPtatParameters(eepromData);
-        ExtractGainParameters(eepromData);
-        ExtractTgcParameters(eepromData);
-        ExtractResolutionParameters(eepromData);
-        ExtractKsTaParameters(eepromData);
-        ExtractKsToParameters(eepromData);
-        ExtractAlphaParameters(eepromData);
-        ExtractOffsetParameters(eepromData);
-        ExtractKtaPixelParameters(eepromData);
-        ExtractKvPixelParameters(eepromData);
-        ExtractCpParameters(eepromData);
-        ExtractCilcParameters(eepromData);
-        ExtractDeviatingPixels(eepromData);
-
-        Console.WriteLine("successfully extracted params from eeprom");
+        // Console.WriteLine("successfully extracted params from eeprom");
+        Console.WriteLine(_mlx.ToString());
     }
 
     private void ExtractVddParameters(ushort[] eepromData)
@@ -624,7 +626,7 @@ public class ThermalCamera
         return 0;
     }
 
-    public static async Task<int> GetFrameData(ushort[] frameData)
+    public async Task<int> GetFrameData(ushort[] frameData)
     {
         ushort dataReady = 0;
         ushort statusWord = 0;
@@ -640,10 +642,10 @@ public class ThermalCamera
         Console.WriteLine("data ready ! :D");
 
         int error = await WriteWordToRegister(StatusRegister, 0x0030);
-        if (error != 0)
-        {
-            return error;
-        }
+        // if (error != 0)
+        // {
+        //     return error;
+        // }
 
         ReadWordsFromRegister(RamStartRegister, frameData);
 
@@ -661,45 +663,52 @@ public class ThermalCamera
         error = ValidateFrameData(frameData);
         if (error != 0)
         {
-            Console.WriteLine("frame validation failed");
+            Console.WriteLine("frame data validation failed");
             return error;
         }
-
+        
         Console.WriteLine("successfully validated frame data");
 
         error = ValidateAuxData(auxData);
         if (error != 0)
         {
-            Console.WriteLine("aux validation failed");
+            Console.WriteLine("aux data validation failed");
             return frameData[833];
         }
-
+        
+        Console.WriteLine("successfully validated aux data");
+        
         for (cnt = 0; cnt < TotAuxData; cnt++)
         {
             frameData[cnt + TotPixels] = auxData[cnt];
         }
 
-        Console.WriteLine("successfully validated aux data");
 
         return frameData[833];
     }
 
-    public async Task GetImage(float[] frame)
+    public async Task<ushort[]> GetImage()
     {
         float emissivity = 0.95F;
         ushort[] frameData = new ushort[834];
+        float[] frame = new float[TotPixels];
 
-        for (int i = 0; i < 2; i++) // first page 1, then page 2
+        for (int i = 0; i < 2; i++) // first sub-page 0, then sub-page 1
         {
             int status = await GetFrameData(frameData);
-            if (status < 0)
-            {
-                throw new IOException("error while getting data frame");
-            }
+            await Task.Delay(400); // sleep RR - 20% (500 - 100)
+            // if (status < 0)
+            // {
+            //     throw new IOException("error while getting data frame");
+            // }
 
             var tr = GetTa(frameData) - 8;
-            CalculateTo(frameData, emissivity, tr, frame);
+            Console.WriteLine($"Tr: {tr}, for calculating pixel To");
+            // FIXME somewhere in CalculateTo() pixel values are reset to 0 
+            // CalculateTo(frameData, emissivity, tr, frame);
         }
+
+        return frameData;
     }
 
     // FIXME mlx C version return only zeros
@@ -766,7 +775,16 @@ public class ThermalCamera
     //     }
     // }
 
-    void CalculateTo(ushort[] frameData, float emissivity, float tr, float[] result)
+    public string GetRefreshRateHz()
+    {
+        var word = ReadWordFromRegister(ControlRegister);
+        
+        var refreshRate = (word >> 7) & 0b111;
+        
+        return RefreshRateToPrettyString(refreshRate);
+    }
+
+    private void CalculateTo(ushort[] frameData, float emissivity, float tr, float[] result)
     {
         float[] irDataCp = new float[2];
         float[] alphaCorrR = new float[4];
@@ -926,32 +944,33 @@ public class ThermalCamera
 
     private static void ReadWordsFromRegister(ushort register, ushort[] words)
     {
-        var frameBuffer = new byte[words.Length * 2];
+        var wordsBuffer = new byte[words.Length * 2];
 
-        ReadFromRegister(register, frameBuffer);
+        ReadFromRegister(register, wordsBuffer);
 
         // Convert bytes to ushort
-        for (int i = 0; i < words.Length; i++)
+        for (int i = 0; i < words.Length; i += 2)
         {
-            words[i] = BitConverter.ToUInt16(frameBuffer, i * 2);
+            words[i] = (ushort)((wordsBuffer[i] << 8) | wordsBuffer[i + 1]);
         }
     }
 
-    private static async Task<byte> WriteWordToRegister(ushort register, ushort word)
+    private static async Task<int> WriteWordToRegister(ushort register, ushort word)
     {
         var cmd = new byte[4];
         cmd[0] = (byte)(register >> 8);
         cmd[1] = (byte)(register & 0xFF);
         cmd[2] = (byte)(word >> 8);
         cmd[3] = (byte)(word & 0xFF);
-        byte[] dataCheck = { 0 };
 
         Device.Write(cmd);
         await Task.Delay(1);
 
-        ReadFromRegister(register, dataCheck);
-
-        return dataCheck[0];
+        ushort dataCheck = ReadWordFromRegister(register);
+        if (dataCheck == word) return 0;
+        
+        Console.WriteLine($"data check failed, {dataCheck} != {word}");
+        return -2;
     }
 
     private static ushort ReadWordFromRegister(ushort register)
@@ -971,35 +990,257 @@ public class ThermalCamera
 
         Device.WriteRead(registerBuffer, readBuffer);
     }
+    
+    private static string RefreshRateToPrettyString(int value)
+    {
+        return value switch
+        {
+            0b000 => "0.5Hz",
+            0b001 => "1Hz",
+            0b010 => "2Hz",
+            0b011 => "4Hz",
+            0b100 => "8Hz",
+            0b101 => "16Hz",
+            0b110 => "32Hz",
+            0b111 => "64Hz",
+            _ => "UNKNOWN"
+        };
+    }
 
     private sealed class ParamsMlx
     {
-        public short KVdd;
-        public short Vdd25;
-        public float KvPtat;
-        public float KtPtat;
-        public ushort VPtat25;
-        public float AlphaPtat;
-        public short GainEe;
-        public float Tgc;
-        public float CpKv;
-        public float CpKta;
-        public byte ResolutionEe;
-        public byte CalibrationModeEe;
-        public float KsTa;
-        public readonly float[] KsTo = new float[5];
-        public readonly short[] Ct = new short[5];
-        public readonly ushort[] Alpha = new ushort[768];
-        public byte AlphaScale;
-        public readonly short[] Offset = new short[768];
-        public readonly sbyte[] Kta = new sbyte[768];
-        public byte KtaScale;
-        public readonly sbyte[] Kv = new sbyte[768];
-        public byte KvScale;
-        public readonly float[] CpAlpha = new float[2];
-        public readonly short[] CpOffset = new short[2];
-        public readonly float[] IlChessC = new float[3];
-        public readonly ushort[] BrokenPixels = new ushort[5];
-        public readonly ushort[] OutlierPixels = new ushort[5];
+        public short KVdd { get; set; } = -2880;
+        public short Vdd25 { get; set; } = -12032;
+        public float KvPtat { get; set; } = 0.002930F;
+        public float KtPtat { get; set; } = 42.625000F;
+        public ushort VPtat25 { get; set; } = 12204;
+        public float AlphaPtat { get; set; } = 9.000000F;
+        public short GainEe { get; set; } = 5916;
+        public float Tgc { get; set; } = 0.000000F;
+        public float CpKv { get; set; } = 0.375000F;
+        public float CpKta { get; set; } = 0.003784F;
+        public byte ResolutionEe { get; set; } = 2;
+        public byte CalibrationModeEe { get; set; } = 128;
+        public float KsTa { get; set; } = -0.002441F;
+
+        public float[] KsTo { get; } = new float[5]
+            { 0.0F, -0.0001983642578125F, -0.0009002685546875F, -0.001495361328125F, -0.0002F };
+
+        public short[] Ct { get; } = new short[5] { -40, 0, 100, 200, 0 };
+
+        public ushort[] Alpha { get; } = new ushort[768]
+        {
+            24379, 21516, 19599, 18924, 16634, 16145, 15249, 15041, 13726, 13474, 13231, 12845, 12203, 12340, 12203,
+            12069, 12003, 12069, 12480, 12551, 12996, 13152, 13726, 14354, 14640, 15144, 16760, 17153, 18604, 19599,
+            23343, 27418, 21946, 20513, 18924, 18294, 16145, 15573, 14738, 14544, 13231, 12996, 12770, 12480, 11810,
+            11874, 11810, 11684, 11623, 11684, 12069, 12136, 12551, 12696, 13311, 13813, 14169, 14640, 16265, 16509,
+            18143, 18924, 21946, 23850, 19775, 18604, 17564, 16634, 14939, 14354, 13557, 13231, 12203, 11938, 11623,
+            11441, 10875, 10769, 10716, 10769, 10613, 10822, 10929, 11151, 11441, 11561, 12340, 12770, 13392, 13557,
+            15144, 15249, 16634, 17287, 19775, 20513, 19088, 18143, 17020, 16145, 14544, 13988, 13231, 12920, 11874,
+            11561, 11265, 11095, 10562, 10461, 10412, 10461, 10266, 10511, 10562, 10822, 11095, 11208, 12003, 12410,
+            12996, 13152, 14738, 14838, 16145, 16760, 19088, 19775, 18143, 17287, 15912, 15464, 13474, 13392, 12623,
+            12203, 11151, 10984, 10664, 10412, 9896, 9808, 9852, 9852, 9808, 9808, 9941, 10032, 10363, 10562, 11265,
+            11441, 11938, 12623, 13813, 14169, 15144, 15797, 18143, 18604, 17705, 16889, 15573, 15041, 13152, 13074,
+            12271, 11938, 10929, 10769, 10412, 10171, 9636, 9594, 9636, 9594, 9594, 9594, 9679, 9808, 10171, 10266,
+            10984, 11151, 11684, 12271, 13557, 13813, 14838, 15464, 17849, 18143, 16889, 16028, 14738, 14261, 12696,
+            12069, 11382, 11323, 10363, 10171, 9721, 9511, 9155, 9079, 9232, 9117, 8932, 9079, 9232, 9430, 9636, 9896,
+            10363, 10613, 11208, 11441, 12770, 13152, 14169, 14738, 16889, 17424, 16509, 15797, 14448, 14078, 12480,
+            11938, 11208, 11095, 10171, 9986, 9511, 9349, 9005, 8896, 9079, 8932, 8789, 8932, 9079, 9271, 9470, 9721,
+            10171, 10412, 11039, 11208, 12551, 12845, 13988, 14448, 16634, 17020, 15912, 15464, 13988, 13392, 12003,
+            11561, 10875, 10562, 9896, 9553, 9310, 9117, 8896, 8651, 8617, 8617, 8583, 8583, 8860, 8932, 9117, 9193,
+            10032, 10171, 10664, 11039, 12271, 12410, 13641, 14354, 16145, 16634, 15685, 15249, 13813, 13231, 11874,
+            11441, 10769, 10461, 9765, 9470, 9232, 9042, 8754, 8550, 8550, 8517, 8484, 8484, 8754, 8824, 9042, 9079,
+            9986, 10032, 10562, 10875, 12136, 12203, 13474, 14169, 16028, 16386, 15685, 15041, 13641, 13231, 11810,
+            11382, 10769, 10412, 9594, 9349, 9155, 9005, 8583, 8517, 8484, 8387, 8419, 8419, 8685, 8685, 8932, 9155,
+            9594, 10032, 10461, 10716, 11747, 12136, 12996, 13813, 15685, 16145, 15685, 14939, 13557, 13152, 11747,
+            11323, 10716, 10363, 9553, 9310, 9117, 8968, 8517, 8484, 8451, 8355, 8355, 8355, 8617, 8617, 8896, 9117,
+            9553, 9986, 10412, 10664, 11747, 12003, 12920, 13641, 15573, 16145, 15573, 14939, 13474, 12996, 11684,
+            11265, 10613, 10363, 9553, 9389, 8968, 8968, 8419, 8387, 8355, 8419, 8292, 8323, 8583, 8617, 8968, 9079,
+            9553, 9986, 10511, 10664, 11747, 12069, 13311, 13641, 15464, 16028, 15573, 14939, 13474, 12996, 11684,
+            11323, 10613, 10363, 9553, 9389, 9005, 9005, 8451, 8387, 8387, 8419, 8323, 8355, 8583, 8617, 8932, 9079,
+            9553, 9986, 10511, 10664, 11747, 12003, 13311, 13641, 15464, 16028, 15685, 15144, 13726, 13074, 11810,
+            11501, 10769, 10613, 9765, 9511, 9005, 8896, 8550, 8484, 8484, 8583, 8517, 8517, 8754, 8789, 9042, 9193,
+            9808, 9852, 10613, 10984, 11938, 12271, 13557, 13813, 15912, 16145, 15797, 15249, 13813, 13231, 11874,
+            11623, 10875, 10664, 9852, 9594, 9079, 8968, 8651, 8583, 8583, 8651, 8617, 8583, 8860, 8860, 9117, 9271,
+            9896, 9896, 10716, 11039, 12003, 12340, 13641, 13900, 16028, 16145, 16386, 16028, 14261, 13813, 12410,
+            11938, 11151, 11039, 10078, 9852, 9636, 9349, 8932, 8932, 8860, 8824, 8932, 8860, 9155, 9232, 9349, 9594,
+            10363, 10412, 10984, 11382, 12410, 12845, 13900, 14544, 16509, 16889, 16634, 16265, 14448, 14078, 12623,
+            12136, 11323, 11208, 10218, 9986, 9765, 9470, 9042, 9079, 9005, 8932, 9042, 9005, 9271, 9349, 9470, 9721,
+            10461, 10562, 11151, 11561, 12551, 12996, 14078, 14640, 16634, 17153, 17564, 16509, 15144, 14544, 13152,
+            12696, 12003, 11623, 10822, 10511, 10078, 9986, 9553, 9511, 9470, 9470, 9430, 9470, 9636, 9852, 9986, 10078,
+            10929, 10929, 11747, 11874, 13074, 13813, 14838, 15356, 17424, 17995, 17849, 16889, 15464, 14838, 13392,
+            12996, 12271, 11810, 11039, 10716, 10314, 10171, 9765, 9721, 9679, 9679, 9636, 9679, 9852, 10078, 10171,
+            10266, 11151, 11151, 12003, 12203, 13311, 14078, 14939, 15573, 17705, 18294, 18924, 17995, 16634, 16028,
+            14261, 13988, 12996, 12696, 11810, 11623, 11208, 11039, 10461, 10266, 10314, 10412, 10266, 10124, 10562,
+            10664, 10822, 11039, 11874, 11874, 12696, 12920, 14354, 14738, 16145, 16386, 19255, 19954, 19954, 18448,
+            17020, 16386, 14640, 14261, 13392, 13074, 12069, 11874, 11501, 11323, 10769, 10562, 10613, 10716, 10562,
+            10412, 10822, 10984, 11151, 11382, 12203, 12203, 12996, 13231, 14640, 15144, 16509, 16760, 19775, 21516,
+            25809, 21516, 18604, 17849, 15912, 15356, 14640, 14169, 13074, 12770, 12480, 12271, 11747, 11561, 11441,
+            11501, 11323, 11323, 11684, 11747, 12069, 12203, 13152, 13474, 14169, 14261, 15797, 16265, 17849, 18294,
+            24652, 29241, 30884, 24931, 19255, 18294, 16386, 15797, 15041, 14640, 13474, 13152, 12845, 12623, 12069,
+            11874, 11810, 11810, 11623, 11684, 12069, 12069, 12410, 12551, 13474, 13900, 14544, 14738, 16265, 16760,
+            18294, 18924, 28857, 34793
+        };
+
+        public byte AlphaScale { get; set; } = 10;
+
+        public short[] Offset { get; } = new short[768]
+        {
+            -40, -48, -39, -53, -42, -51, -41, -57, -44, -55, -43, -61, -47, -57, -45, -65, -46, -61, -46, -66, -45,
+            -62, -47, -67, -46, -65, -47, -70, -50, -66, -45, -75, -48, -56, -55, -55, -50, -59, -58, -59, -52, -64,
+            -59, -63, -55, -66, -61, -66, -53, -68, -62, -67, -52, -69, -62, -68, -52, -72, -61, -70, -55, -71, -59,
+            -75, -43, -50, -40, -55, -45, -52, -43, -59, -47, -57, -45, -63, -49, -60, -48, -66, -48, -62, -49, -68,
+            -48, -63, -48, -68, -45, -65, -47, -71, -49, -66, -46, -77, -50, -58, -56, -57, -53, -60, -59, -61, -54,
+            -65, -61, -65, -56, -68, -63, -67, -54, -69, -64, -68, -55, -70, -62, -69, -51, -71, -61, -71, -55, -73,
+            -60, -77, -41, -50, -42, -55, -43, -52, -43, -58, -44, -57, -46, -63, -48, -60, -48, -66, -45, -62, -49,
+            -68, -47, -63, -48, -69, -46, -64, -48, -70, -50, -66, -46, -76, -49, -59, -58, -58, -52, -61, -59, -62,
+            -53, -66, -62, -65, -56, -69, -64, -69, -53, -70, -65, -70, -54, -71, -63, -70, -53, -71, -62, -71, -56,
+            -74, -60, -78, -44, -50, -42, -56, -45, -54, -45, -59, -48, -57, -48, -65, -51, -62, -48, -67, -50, -63,
+            -50, -69, -50, -63, -49, -70, -47, -66, -48, -71, -50, -66, -46, -77, -52, -61, -60, -59, -55, -65, -63,
+            -63, -57, -68, -65, -68, -60, -71, -65, -71, -58, -72, -67, -71, -58, -72, -66, -72, -55, -74, -64, -72,
+            -57, -74, -62, -79, -45, -50, -43, -57, -46, -54, -46, -61, -48, -59, -48, -65, -49, -62, -50, -68, -49,
+            -64, -51, -70, -51, -66, -49, -70, -48, -65, -49, -71, -50, -65, -46, -77, -55, -63, -62, -62, -57, -66,
+            -64, -66, -58, -70, -67, -69, -59, -73, -68, -72, -58, -74, -68, -73, -59, -75, -66, -73, -56, -75, -65,
+            -74, -57, -74, -63, -79, -42, -50, -44, -56, -45, -54, -46, -60, -48, -59, -50, -65, -49, -61, -52, -69,
+            -49, -64, -51, -70, -51, -64, -51, -69, -48, -66, -51, -72, -53, -67, -48, -77, -53, -64, -63, -63, -56,
+            -66, -64, -67, -58, -71, -67, -71, -60, -73, -69, -73, -59, -75, -69, -75, -60, -75, -69, -73, -57, -76,
+            -67, -75, -61, -77, -64, -81, -47, -51, -46, -58, -49, -58, -48, -62, -51, -60, -51, -66, -53, -63, -53,
+            -69, -51, -65, -53, -71, -52, -65, -53, -70, -48, -66, -51, -73, -51, -67, -49, -78, -59, -67, -67, -66,
+            -60, -70, -68, -69, -63, -73, -71, -73, -65, -76, -72, -74, -62, -78, -72, -76, -62, -77, -71, -74, -58,
+            -78, -69, -76, -60, -77, -67, -82, -50, -51, -48, -59, -50, -55, -49, -62, -51, -60, -53, -69, -55, -64,
+            -53, -70, -52, -65, -54, -72, -54, -66, -53, -73, -50, -66, -52, -73, -52, -68, -49, -79, -63, -69, -69,
+            -69, -63, -71, -71, -71, -63, -75, -74, -76, -67, -77, -74, -76, -63, -80, -74, -77, -64, -79, -72, -79,
+            -60, -79, -71, -78, -61, -79, -68, -84, -49, -51, -49, -60, -50, -57, -51, -64, -52, -61, -54, -69, -54,
+            -64, -56, -71, -51, -66, -54, -72, -54, -67, -53, -72, -52, -67, -56, -74, -55, -68, -52, -79, -64, -68,
+            -72, -69, -64, -73, -74, -73, -65, -77, -75, -78, -68, -79, -77, -80, -63, -80, -75, -79, -66, -80, -73,
+            -79, -62, -81, -74, -80, -65, -81, -71, -86, -54, -54, -52, -62, -54, -57, -52, -65, -54, -62, -55, -70,
+            -57, -65, -56, -72, -54, -66, -57, -73, -55, -68, -55, -74, -54, -69, -56, -73, -56, -68, -54, -80, -69,
+            -74, -76, -74, -69, -75, -76, -77, -69, -79, -79, -79, -71, -81, -79, -81, -68, -82, -79, -81, -68, -83,
+            -77, -83, -65, -83, -77, -81, -67, -83, -74, -87, -56, -55, -54, -62, -55, -58, -54, -66, -56, -63, -55,
+            -70, -58, -67, -57, -73, -56, -68, -57, -74, -57, -68, -57, -75, -55, -69, -57, -75, -57, -69, -55, -79,
+            -73, -78, -79, -76, -72, -78, -80, -79, -72, -81, -81, -81, -74, -85, -82, -83, -71, -86, -82, -84, -71,
+            -85, -80, -85, -69, -87, -80, -84, -69, -86, -76, -88, -55, -55, -55, -64, -56, -60, -56, -68, -56, -63,
+            -59, -71, -58, -66, -60, -74, -57, -68, -58, -75, -58, -68, -58, -75, -58, -70, -61, -77, -61, -71, -59,
+            -79, -83, -88, -92, -88, -83, -91, -92, -90, -82, -93, -92, -94, -83, -95, -94, -96, -83, -97, -92, -96,
+            -82, -96, -92, -94, -80, -98, -92, -97, -82, -96, -85, -99
+        };
+
+        public sbyte[] Kta { get; } = new sbyte[768]
+        {
+            47, 48, 47, 40, 39, 48, 39, 40, 39, 48, 47, 40, 39, 48, 47, 40, 47, 48, 47, 40, 47, 48, 47, 40, 47, 48, 55,
+            48, 47, 48, 55, 48, 48, 36, 40, 44, 48, 36, 40, 44, 48, 36, 40, 44, 48, 44, 40, 44, 56, 44, 40, 44, 56, 44,
+            40, 44, 56, 44, 40, 44, 56, 44, 48, 44, 39, 48, 47, 40, 39, 48, 47, 40, 39, 48, 47, 40, 47, 48, 39, 40, 47,
+            48, 47, 40, 47, 48, 47, 48, 55, 48, 47, 40, 47, 56, 55, 48, 48, 36, 40, 44, 48, 36, 40, 44, 48, 36, 40, 44,
+            48, 36, 40, 44, 56, 44, 40, 52, 56, 44, 40, 44, 56, 44, 48, 52, 56, 44, 48, 44, 39, 48, 47, 40, 39, 48, 47,
+            40, 47, 48, 47, 40, 47, 48, 47, 40, 47, 48, 47, 40, 47, 48, 47, 40, 55, 48, 47, 48, 47, 56, 55, 48, 48, 36,
+            40, 44, 56, 36, 40, 44, 48, 36, 40, 44, 48, 36, 40, 44, 56, 44, 40, 44, 56, 44, 40, 44, 56, 44, 48, 44, 56,
+            44, 56, 44, 39, 48, 47, 40, 39, 48, 47, 40, 39, 48, 47, 40, 39, 48, 47, 40, 39, 48, 47, 40, 47, 48, 47, 40,
+            47, 48, 55, 48, 47, 56, 55, 48, 48, 36, 40, 44, 48, 36, 40, 44, 48, 36, 40, 52, 48, 44, 40, 44, 56, 44, 40,
+            44, 56, 44, 40, 44, 56, 44, 48, 52, 56, 44, 48, 44, 39, 56, 47, 48, 39, 48, 47, 40, 47, 48, 47, 40, 47, 48,
+            47, 40, 47, 48, 47, 40, 47, 48, 55, 48, 55, 48, 55, 48, 55, 56, 55, 48, 48, 36, 40, 44, 48, 36, 40, 44, 48,
+            36, 40, 44, 48, 44, 40, 44, 56, 44, 40, 44, 56, 44, 48, 44, 56, 44, 48, 52, 56, 44, 48, 52, 47, 48, 47, 40,
+            47, 48, 39, 48, 39, 48, 39, 40, 47, 48, 47, 40, 47, 56, 47, 48, 47, 48, 47, 48, 55, 56, 55, 48, 47, 56, 55,
+            48, 48, 36, 40, 44, 56, 44, 40, 44, 48, 36, 40, 44, 56, 44, 40, 44, 56, 44, 40, 44, 56, 44, 40, 44, 56, 44,
+            48, 44, 56, 44, 48, 44, 47, 56, 39, 40, 47, 56, 47, 40, 39, 48, 47, 40, 47, 48, 47, 40, 47, 48, 47, 48, 47,
+            48, 47, 48, 55, 56, 55, 48, 55, 56, 55, 48, 48, 44, 40, 44, 48, 44, 40, 44, 48, 44, 40, 44, 48, 44, 40, 44,
+            56, 44, 40, 44, 56, 44, 48, 44, 56, 44, 48, 52, 56, 44, 48, 52, 39, 56, 47, 48, 47, 56, 47, 48, 47, 48, 47,
+            40, 47, 56, 47, 40, 47, 56, 47, 40, 47, 48, 55, 48, 55, 56, 55, 48, 55, 56, 55, 48, 48, 44, 40, 44, 48, 44,
+            40, 44, 48, 44, 40, 44, 48, 44, 40, 44, 56, 44, 40, 44, 56, 44, 40, 44, 64, 44, 48, 52, 56, 44, 48, 52, 47,
+            56, 47, 48, 47, 48, 47, 48, 47, 56, 47, 48, 47, 48, 47, 48, 47, 48, 47, 48, 47, 48, 47, 48, 55, 56, 47, 48,
+            47, 56, 55, 48, 56, 44, 40, 44, 56, 44, 40, 44, 48, 44, 40, 44, 56, 44, 40, 44, 56, 44, 40, 44, 56, 44, 40,
+            44, 56, 44, 48, 52, 56, 44, 48, 52, 39, 56, 47, 48, 47, 56, 47, 48, 47, 56, 47, 48, 47, 48, 47, 48, 47, 56,
+            47, 48, 47, 48, 55, 48, 55, 56, 55, 48, 47, 56, 55, 48, 48, 44, 40, 44, 48, 44, 40, 44, 48, 44, 40, 44, 56,
+            44, 40, 44, 56, 44, 40, 44, 56, 44, 48, 44, 56, 44, 48, 52, 56, 44, 48, 52, 47, 56, 47, 48, 47, 56, 47, 48,
+            47, 56, 47, 48, 47, 48, 47, 48, 47, 56, 47, 48, 47, 56, 47, 48, 55, 56, 55, 48, 55, 56, 55, 48, 48, 44, 40,
+            44, 56, 44, 40, 44, 48, 44, 40, 44, 56, 44, 40, 44, 56, 44, 40, 44, 56, 44, 48, 52, 56, 44, 48, 52, 56, 44,
+            48, 52, 47, 56, 47, 56, 47, 56, 47, 48, 47, 56, 47, 48, 47, 56, 47, 48, 47, 56, 47, 48, 47, 56, 55, 48, 47,
+            56, 47, 48, 47, 56, 55, 48, 48, 44, 40, 44, 48, 44, 40, 44, 56, 44, 40, 44, 56, 44, 40, 44, 56, 44, 48, 52,
+            56, 44, 48, 52, 56, 44, 48, 52, 56, 44, 48, 52
+        };
+
+        public byte KtaScale { get; set; } = 13;
+
+        public sbyte[] Kv { get; } = new sbyte[768]
+        {
+            64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64,
+            48, 64, 48, 64, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64,
+            48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 64, 48, 64, 48, 64, 48, 64,
+            48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48,
+            64, 48, 64, 48, 64, 48, 64, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48,
+            64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 64, 48, 64, 48,
+            64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64,
+            48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64,
+            48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 64,
+            48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48,
+            64, 48, 64, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48,
+            64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 64, 48, 64, 48, 64, 48, 64, 48,
+            64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64, 48, 64,
+            48, 64, 48, 64, 48, 64, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+            48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48
+        };
+
+        public byte KvScale { get; set; } = 7;
+        public float[] CpAlpha { get; } = new float[2] { 4.540197551250458e-09F, 4.540197551250458e-09F };
+        public short[] CpOffset { get; } = new short[2] { -61, -56 };
+
+        public float[] IlChessC { get; } = new float[3]
+        {
+            0.4375F, 3.5F, 0.125F
+        };
+
+        public ushort[] BrokenPixels { get; } = new ushort[5];
+        public ushort[] OutlierPixels { get; } = new ushort[5];
+
+        public override string ToString()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"KVdd: {KVdd}");
+            sb.AppendLine($"Vdd25: {Vdd25}");
+            sb.AppendLine($"KvPtat: {KvPtat}");
+            sb.AppendLine($"KtPtat: {KtPtat}");
+            sb.AppendLine($"VPtat25: {VPtat25}");
+            sb.AppendLine($"AlphaPtat: {AlphaPtat}");
+            sb.AppendLine($"GainEe: {GainEe}");
+            sb.AppendLine($"Tgc: {Tgc}");
+            sb.AppendLine($"CpKv: {CpKv}");
+            sb.AppendLine($"CpKta: {CpKta}");
+            sb.AppendLine($"ResolutionEe: {ResolutionEe}");
+            sb.AppendLine($"CalibrationModeEe: {CalibrationModeEe}");
+            sb.AppendLine($"KsTa: {KsTa}");
+            sb.AppendLine($"KsTo: [{string.Join(", ", KsTo)}]");
+            sb.AppendLine($"Ct: [{string.Join(", ", Ct)}]");
+            sb.AppendLine($"Alpha: [{string.Join(", ", Alpha)}]");
+            sb.AppendLine($"AlphaScale: {AlphaScale}");
+            sb.AppendLine($"Offset: [{string.Join(", ", Offset)}]");
+            sb.AppendLine($"Kta: [{string.Join(", ", Kta)}]");
+            sb.AppendLine($"KtaScale: {KtaScale}");
+            sb.AppendLine($"Kv: [{string.Join(", ", Kv)}]");
+            sb.AppendLine($"KvScale: {KvScale}");
+            sb.AppendLine($"CpAlpha: [{string.Join(", ", CpAlpha)}]");
+            sb.AppendLine($"CpOffset: [{string.Join(", ", CpOffset)}]");
+            sb.AppendLine($"IlChessC: [{string.Join(", ", IlChessC)}]");
+            sb.AppendLine($"BrokenPixels: [{string.Join(", ", BrokenPixels)}]");
+            sb.AppendLine($"OutlierPixels: [{string.Join(", ", OutlierPixels)}]");
+            return sb.ToString();
+        }
+    }
+
+    public void Dispose()
+    {
+        Device.Dispose();
     }
 }
