@@ -5,7 +5,7 @@ namespace ThermalCamera;
 
 public sealed class ThermalCamera : IDisposable
 {
-    private static readonly I2cDevice Device = I2cBus.Create(1).CreateDevice(0x33);
+    private readonly I2cDevice _device;
     private readonly ParamsMlx _mlx;
     public const int TotPixels = 768;
     public const int TotColumns = 32;
@@ -23,6 +23,7 @@ public sealed class ThermalCamera : IDisposable
 
     public ThermalCamera()
     {
+        _device = I2cBus.Create(1).CreateDevice(0x33);
         _mlx = new ParamsMlx();
 
         // var eepromData = new ushort[832];
@@ -44,7 +45,7 @@ public sealed class ThermalCamera : IDisposable
         // ExtractDeviatingPixels(eepromData);
 
         // Console.WriteLine("successfully extracted params from eeprom");
-        Console.WriteLine(_mlx.ToString());
+        // Console.WriteLine(_mlx.ToString());
     }
 
     private void ExtractVddParameters(ushort[] eepromData)
@@ -78,7 +79,7 @@ public sealed class ThermalCamera : IDisposable
 
         var vPtat25 = eeData[49];
 
-        var alphaPtat = (float)((eeData[16] & 0xF000) / Math.Pow(14, 2) + 8.0f);
+        var alphaPtat = (float)((eeData[16] & 0xF000) / Math.Pow(2, 14) + 8.0f);
 
         _mlx.KvPtat = kvPtat;
         _mlx.KtPtat = ktPtat;
@@ -140,7 +141,6 @@ public sealed class ThermalCamera : IDisposable
         var accRemScale = (byte)(eeData[32] & 0x000F);
         var accColumnScale = (byte)((eeData[32] & 0x00F0) >> 4);
         var accRowScale = (byte)((eeData[32] & 0x0F00) >> 8);
-        var alphaScale = (byte)(((eeData[32] & 0xF000) >> 12) + 30);
         int alphaRef = eeData[33];
 
         for (int i = 0; i < 6; i++)
@@ -191,7 +191,7 @@ public sealed class ThermalCamera : IDisposable
                 alphaTemp[p] *= 1 << accRemScale;
                 alphaTemp[p] = alphaRef + (accRow[i] << accRowScale) + (accColumn[j] << accColumnScale) +
                                alphaTemp[p];
-                alphaTemp[p] /= (float)Math.Pow(alphaScale, 2);
+                alphaTemp[p] /= (float)Math.Pow(2, 4);
                 alphaTemp[p] -= _mlx.Tgc * (_mlx.CpAlpha[0] + _mlx.CpAlpha[1]) / 2;
                 alphaTemp[p] = (float)(0.000001 / alphaTemp[p]);
             }
@@ -206,7 +206,7 @@ public sealed class ThermalCamera : IDisposable
             }
         }
 
-        alphaScale = 0;
+        byte alphaScale = 0;
         while (temp < 32767.4)
         {
             temp *= 2;
@@ -215,7 +215,7 @@ public sealed class ThermalCamera : IDisposable
 
         for (int i = 0; i < TotPixels; i++)
         {
-            temp = (float)(alphaTemp[i] * Math.Pow(alphaScale, 2));
+            temp = (float)(alphaTemp[i] * Math.Pow(2, alphaScale));
             _mlx.Alpha[i] = (ushort)(temp + 0.5);
         }
 
@@ -312,7 +312,7 @@ public sealed class ThermalCamera : IDisposable
 
                 ktaTemp[p] *= 1 << ktaScale2;
                 ktaTemp[p] = ktaRc[split] + ktaTemp[p];
-                ktaTemp[p] /= (float)Math.Pow(ktaScale1, 2);
+                ktaTemp[p] /= (float)Math.Pow(2, ktaScale1);
             }
         }
 
@@ -334,7 +334,7 @@ public sealed class ThermalCamera : IDisposable
 
         for (int i = 0; i < TotPixels; i++)
         {
-            temp = (float)(ktaTemp[i] * Math.Pow(ktaScale1, 2));
+            temp = (float)(ktaTemp[i] * Math.Pow(2, ktaScale1));
             if (temp < 0)
             {
                 _mlx.Kta[i] = (sbyte)(temp - 0.5);
@@ -395,7 +395,7 @@ public sealed class ThermalCamera : IDisposable
                 var p = 32 * i + j;
                 var split = (byte)(2 * (p / 32 - p / 64 * 2) + p % 2);
                 kvTemp[p] = kvT[split];
-                kvTemp[p] /= (float)Math.Pow(kvScale, 2);
+                kvTemp[p] /= (float)Math.Pow(2, kvScale);
             }
         }
 
@@ -417,7 +417,7 @@ public sealed class ThermalCamera : IDisposable
 
         for (int i = 0; i < TotPixels; i++)
         {
-            temp = (float)(kvTemp[i] * Math.Pow(kvScale, 2));
+            temp = (float)(kvTemp[i] * Math.Pow(2, kvScale));
             if (temp < 0)
             {
                 _mlx.Kv[i] = (sbyte)(temp - 0.5);
@@ -458,7 +458,7 @@ public sealed class ThermalCamera : IDisposable
             alphaSp[0] -= 1024;
         }
 
-        alphaSp[0] /= (float)Math.Pow(alphaScale, 2);
+        alphaSp[0] /= (float)Math.Pow(2, alphaScale);
 
         // alphaSp[1] = (eeData[57] & 0xFC00) >> 10;
         if (alphaSp[1] > 31)
@@ -471,12 +471,12 @@ public sealed class ThermalCamera : IDisposable
         float cpKta = eeData[59] & 0x00FF;
 
         byte ktaScale1 = (byte)(((eeData[56] & 0x00F0) >> 4) + 8);
-        _mlx.CpKta = (float)(cpKta / Math.Pow(ktaScale1, 2));
+        _mlx.CpKta = (float)(cpKta / Math.Pow(2, ktaScale1));
 
         float cpKv = (eeData[59] & 0xFF00) >> 8;
 
         int kvScale = (eeData[56] & 0x0F00) >> 8;
-        _mlx.CpKv = (float)(cpKv / Math.Pow(kvScale, 2));
+        _mlx.CpKv = (float)(cpKv / Math.Pow(2, kvScale));
 
         _mlx.CpAlpha[0] = alphaSp[0];
         _mlx.CpAlpha[1] = alphaSp[1];
@@ -626,8 +626,9 @@ public sealed class ThermalCamera : IDisposable
         return 0;
     }
 
-    public async Task<int> GetFrameData(ushort[] frameData)
+    private async Task<int> GetFrameData(ushort[] frameData)
     {
+        int status;
         ushort dataReady = 0;
         ushort statusWord = 0;
         ushort[] auxData = new ushort[64];
@@ -641,15 +642,23 @@ public sealed class ThermalCamera : IDisposable
 
         Console.WriteLine("data ready ! :D");
 
-        int error = await WriteWordToRegister(StatusRegister, 0x0030);
-        // if (error != 0)
-        // {
-        //     return error;
-        // }
+        while (dataReady != 0)
+        {
+            status = await WriteInitValueToStatusRegister();
+            if (status < 0) // error !
+            {
+                return status;
+            }
 
-        ReadWordsFromRegister(RamStartRegister, frameData);
+            ReadWordsFromRegister(RamStartRegister, frameData);
 
-        Console.WriteLine("successfully read frame data from ram !");
+            // DebugFrame(frameData);
+
+            statusWord = ReadWordFromRegister(StatusRegister);
+            dataReady = (ushort)((statusWord >> 3) & 0b1);
+        }
+
+        Console.WriteLine($"successfully read frame data from ram ! {DateTime.Now}");
 
         ReadWordsFromRegister(AuxDataStartAddress, auxData);
 
@@ -658,19 +667,19 @@ public sealed class ThermalCamera : IDisposable
         var controlWord = ReadWordFromRegister(ControlRegister);
 
         frameData[832] = controlWord;
-        frameData[833] = statusWord;
+        frameData[833] = (ushort)(statusWord & 0x0001);
 
-        error = ValidateFrameData(frameData);
-        if (error != 0)
+        status = ValidateFrameData(frameData);
+        if (status != 0)
         {
             Console.WriteLine("frame data validation failed");
-            return error;
+            return status;
         }
         
         Console.WriteLine("successfully validated frame data");
-
-        error = ValidateAuxData(auxData);
-        if (error != 0)
+        
+        status = ValidateAuxData(auxData);
+        if (status != 0)
         {
             Console.WriteLine("aux data validation failed");
             return frameData[833];
@@ -682,12 +691,13 @@ public sealed class ThermalCamera : IDisposable
         {
             frameData[cnt + TotPixels] = auxData[cnt];
         }
-
+        
+        Console.WriteLine("successfully assigned aux data to register");
 
         return frameData[833];
     }
 
-    public async Task<ushort[]> GetImage()
+    public async Task<float[]> GetImage()
     {
         float emissivity = 0.95F;
         ushort[] frameData = new ushort[834];
@@ -696,19 +706,22 @@ public sealed class ThermalCamera : IDisposable
         for (int i = 0; i < 2; i++) // first sub-page 0, then sub-page 1
         {
             int status = await GetFrameData(frameData);
-            await Task.Delay(400); // sleep RR - 20% (500 - 100)
-            // if (status < 0)
-            // {
-            //     throw new IOException("error while getting data frame");
-            // }
+            if (status < 0)
+            {
+                throw new IOException("error while getting data frame");
+            }
 
             var tr = GetTa(frameData) - 8;
             Console.WriteLine($"Tr: {tr}, for calculating pixel To");
-            // FIXME somewhere in CalculateTo() pixel values are reset to 0 
-            // CalculateTo(frameData, emissivity, tr, frame);
+            CalculateTo(frameData, emissivity, tr, frame);
         }
 
-        return frameData;
+        if (frameData.Take(TotPixels).Any(w => w == 0))
+        {
+            Console.WriteLine("failed to populate both sub-pages");
+        }
+
+        return frame;
     }
 
     // FIXME mlx C version return only zeros
@@ -775,46 +788,57 @@ public sealed class ThermalCamera : IDisposable
     //     }
     // }
 
-    public string GetRefreshRateHz()
+    public string GetRefreshRateToString()
     {
         var word = ReadWordFromRegister(ControlRegister);
-        
+
         var refreshRate = (word >> 7) & 0b111;
-        
+
         return RefreshRateToPrettyString(refreshRate);
+    }
+
+    public async Task SetRefreshRate(RefreshRate refreshRate)
+    {
+        ushort controlWord = ReadWordFromRegister(ControlRegister);
+        var newRefreshRate = (byte)refreshRate << 7;
+        ushort newControlWord = (ushort)(newRefreshRate | (controlWord & 0xFC7F));
+        await WriteWordToRegister(ControlRegister, newControlWord);
     }
 
     private void CalculateTo(ushort[] frameData, float emissivity, float tr, float[] result)
     {
-        float[] irDataCp = new float[2];
-        float[] alphaCorrR = new float[4];
+        float[] irDataCp = new float[2]; 
+        float[] alphaCorrR = new float[4]; 
 
-        var subPage = frameData[833];
-        float vdd = GetVdd(frameData);
-        float ta = GetTa(frameData);
+        var subPage = frameData[833]; 
+        float vdd = GetVdd(frameData); 
+        float ta = GetTa(frameData); 
 
-        float ta4 = (float)(ta + 273.15);
-        ta4 *= ta4;
-        ta4 *= ta4;
-        float tr4 = (float)(tr + 273.15);
-        tr4 *= tr4;
-        tr4 *= tr4;
-        var taTr = tr4 - (tr4 - ta4) / emissivity;
+        Console.WriteLine($"Vdd: {vdd}, for calculating pixel To");
+        Console.WriteLine($"Ta: {ta}, for calculating pixel To");
 
-        float ktaScale = (float)Math.Pow(_mlx.KtaScale, 2);
-        float kvScale = (float)Math.Pow(_mlx.KvScale, 2);
-        float alphaScale = (float)Math.Pow(_mlx.AlphaScale, 2);
+        float ta4 = ta + 273.15F; 
+        ta4 *= ta4; 
+        ta4 *= ta4; 
+        float tr4 = tr + 273.15F; 
+        tr4 *= tr4; 
+        tr4 *= tr4; 
+        var taTr = tr4 - (tr4 - ta4) / emissivity; 
 
-        alphaCorrR[0] = 1 / (1 + _mlx.KsTo[0] * 40);
-        alphaCorrR[1] = 1;
-        alphaCorrR[2] = 1 + _mlx.KsTo[1] * _mlx.Ct[2];
-        alphaCorrR[3] = alphaCorrR[2] * (1 + _mlx.KsTo[2] * (_mlx.Ct[3] - _mlx.Ct[2]));
+        float ktaScale = (float)Math.Pow(2, _mlx.KtaScale); 
+        float kvScale = (float)Math.Pow(2, _mlx.KvScale); 
+        float alphaScale = (float)Math.Pow(2, _mlx.AlphaScale); 
+
+        alphaCorrR[0] = 1 / (1 + _mlx.KsTo[0] * 40); 
+        alphaCorrR[1] = 1; 
+        alphaCorrR[2] = 1 + _mlx.KsTo[1] * _mlx.Ct[2]; 
+        alphaCorrR[3] = alphaCorrR[2] * (1 + _mlx.KsTo[2] * (_mlx.Ct[3] - _mlx.Ct[2])); 
 
         //------------------------- Gain calculation -----------------------------------    
-        var gain = (float)_mlx.GainEe / (short)frameData[778];
+        float gain = (float)_mlx.GainEe / (short)frameData[778];
 
         //------------------------- To calculation -------------------------------------    
-        byte mode = (byte)((frameData[832] & (1UL << 12)) >> 5);
+        byte mode = (byte)((frameData[832] & 0x1000) >> 5); 
 
         irDataCp[0] = (short)frameData[776] * gain;
         irDataCp[1] = (short)frameData[808] * gain;
@@ -822,22 +846,27 @@ public sealed class ThermalCamera : IDisposable
         irDataCp[0] -= (float)(_mlx.CpOffset[0] * (1 + _mlx.CpKta * (ta - 25)) * (1 + _mlx.CpKv * (vdd - 3.3)));
         if (mode == _mlx.CalibrationModeEe)
         {
-            irDataCp[1] = (float)(irDataCp[1] -
-                                  _mlx.CpOffset[1] * (1 + _mlx.CpKta * (ta - 25)) * (1 + _mlx.CpKv * (vdd - 3.3)));
+            irDataCp[1] = (float)(irDataCp[1] - _mlx.CpOffset[1] *
+                (1 + _mlx.CpKta * (ta - 25)) * (1 + _mlx.CpKv * (vdd - 3.3)));
         }
         else
         {
-            irDataCp[1] = (float)(irDataCp[1] - (_mlx.CpOffset[1] + _mlx.IlChessC[0]) * (1 + _mlx.CpKta * (ta - 25)) *
-                (1 + _mlx.CpKv * (vdd - 3.3)));
+            irDataCp[1] = (float)(irDataCp[1] - (_mlx.CpOffset[1] + _mlx.IlChessC[0]) *
+                (1 + _mlx.CpKta * (ta - 25)) * (1 + _mlx.CpKv * (vdd - 3.3)));
         }
 
         for (int pixelNumber = 0; pixelNumber < TotPixels; pixelNumber++)
         {
-            sbyte ilPattern = (sbyte)(pixelNumber / 32 - (pixelNumber / 64) * 2);
-            sbyte chessPattern = (sbyte)(ilPattern ^ (pixelNumber - (pixelNumber / 2) * 2));
+            sbyte ilPattern = (sbyte)(pixelNumber / 32 - pixelNumber / 64 * 2);
+            sbyte chessPattern = (sbyte)(ilPattern ^ (pixelNumber - pixelNumber / 2 * 2));
             sbyte conversionPattern =
-                (sbyte)(((pixelNumber + 2) / 4 - (pixelNumber + 3) / 4 + (pixelNumber + 1) / 4 - pixelNumber / 4) *
-                        (1 - 2 * ilPattern));
+                (sbyte)((
+                        (pixelNumber + 2) / 4
+                        - (pixelNumber + 3) / 4
+                        + (pixelNumber + 1) / 4
+                        - pixelNumber / 4
+                    ) * (1 - 2 * ilPattern)
+                );
 
             var pattern = mode == 0 ? ilPattern : chessPattern;
 
@@ -896,11 +925,10 @@ public sealed class ThermalCamera : IDisposable
 
     private float GetTa(ushort[] frameData)
     {
-        var vdd = GetVdd(frameData);
+        float vdd = GetVdd(frameData);
+        short ptat = (short)frameData[800];
 
-        var ptat = (short)frameData[800];
-
-        var ptatArt = (float)(ptat / (ptat * _mlx.AlphaPtat + (short)frameData[768]) * Math.Pow(18, 2));
+        float ptatArt = (short)(ptat / (ptat * _mlx.AlphaPtat + (short)frameData[768]) * Math.Pow(2, 18));
 
         var ta = (float)(ptatArt / (1 + _mlx.KvPtat * (vdd - 3.3)) - _mlx.VPtat25);
         ta = ta / _mlx.KtPtat + 25;
@@ -908,13 +936,22 @@ public sealed class ThermalCamera : IDisposable
         return ta;
     }
 
+    // private float GetVdd(ushort[] frameData)
+    // {
+    //     var resolutionRam = (ushort)((frameData[832] & (~(~0 << 2) << 10)) >> 10);
+    //     var resolutionCorrection = (float)(Math.Pow(2, _mlx.ResolutionEe) / Math.Pow(2, resolutionRam));
+    //     var vdd = (float)((resolutionCorrection * frameData[810] - _mlx.Vdd25) / _mlx.KVdd + 3.3);
+    //
+    //     return vdd;
+    // }
+
     private float GetVdd(ushort[] frameData)
     {
-        var resolutionRam = (ushort)((frameData[832] & (~(~0 << 2) << 10)) >> 10);
-        var resolutionCorrection = (float)(Math.Pow(_mlx.ResolutionEe, 2) / Math.Pow(resolutionRam, 2));
-        var vdd = (float)((resolutionCorrection * frameData[810] - _mlx.Vdd25) / _mlx.KVdd + 3.3);
+        short vdd = (short)frameData[810];
 
-        return vdd;
+        int resolutionRam = (frameData[832] & 0x0C00) >> 10;
+        float resolutionCorrection = (float)(Math.Pow(2, _mlx.ResolutionEe) / Math.Pow(2, resolutionRam));
+        return (float)((resolutionCorrection * vdd - _mlx.Vdd25) / _mlx.KVdd + 3.3);
     }
 
     private static int ValidateFrameData(ushort[] frameData)
@@ -942,20 +979,39 @@ public sealed class ThermalCamera : IDisposable
         return 0;
     }
 
-    private static void ReadWordsFromRegister(ushort register, ushort[] words)
+    private void ReadWordsFromRegister(ushort register, ushort[] words)
     {
         var wordsBuffer = new byte[words.Length * 2];
 
         ReadFromRegister(register, wordsBuffer);
 
         // Convert bytes to ushort
-        for (int i = 0; i < words.Length; i += 2)
+        for (int i = 0; i < wordsBuffer.Length; i += 2)
         {
-            words[i] = (ushort)((wordsBuffer[i] << 8) | wordsBuffer[i + 1]);
+            words[i / 2] = (ushort)((wordsBuffer[i] << 8) | wordsBuffer[i + 1]); // MSB at index 0, LSB at index 1
         }
     }
 
-    private static async Task<int> WriteWordToRegister(ushort register, ushort word)
+    private async Task<int> WriteInitValueToStatusRegister()
+    {
+        ushort initWord = 0x0030;
+        int subPage0Check = 0x10;
+        int subPage1Check = 0x11;
+
+        await WriteWordToRegister(StatusRegister, initWord);
+
+        ushort dataCheck = ReadWordFromRegister(StatusRegister);
+        if (dataCheck == subPage0Check || dataCheck == subPage1Check)
+        {
+            Console.WriteLine($"page {(dataCheck == subPage0Check ? "0" : "1")} has been measured");
+            return dataCheck;
+        }
+
+        Console.WriteLine($"data check failed, {dataCheck} != {subPage0Check} && {subPage1Check}");
+        return -2;
+    }
+
+    private async Task WriteWordToRegister(ushort register, ushort word)
     {
         var cmd = new byte[4];
         cmd[0] = (byte)(register >> 8);
@@ -963,34 +1019,31 @@ public sealed class ThermalCamera : IDisposable
         cmd[2] = (byte)(word >> 8);
         cmd[3] = (byte)(word & 0xFF);
 
-        Device.Write(cmd);
-        await Task.Delay(1);
-
-        ushort dataCheck = ReadWordFromRegister(register);
-        if (dataCheck == word) return 0;
+        _device.Write(cmd);
         
-        Console.WriteLine($"data check failed, {dataCheck} != {word}");
-        return -2;
+        Console.WriteLine("Wrote: " + string.Join(", ", Array.ConvertAll(cmd, b => "0x" + b.ToString("X"))));
+        
+        await Task.Delay(1);
     }
 
-    private static ushort ReadWordFromRegister(ushort register)
+    private ushort ReadWordFromRegister(ushort register)
     {
         var wordBuffer = new byte[2];
 
         ReadFromRegister(register, wordBuffer);
 
-        return (ushort)((wordBuffer[0] << 8) | wordBuffer[1]);
+        return (ushort)((wordBuffer[0] << 8) | wordBuffer[1]); // MSB at index 0, LSB at index 1
     }
 
-    private static void ReadFromRegister(ushort register, byte[] readBuffer)
+    private void ReadFromRegister(ushort register, byte[] readBuffer)
     {
         var registerBuffer = new byte[2];
         registerBuffer[0] = (byte)(register >> 8);
         registerBuffer[1] = (byte)(register & 0xFF);
 
-        Device.WriteRead(registerBuffer, readBuffer);
+        _device.WriteRead(registerBuffer, readBuffer);
     }
-    
+
     private static string RefreshRateToPrettyString(int value)
     {
         return value switch
@@ -1005,6 +1058,35 @@ public sealed class ThermalCamera : IDisposable
             0b111 => "64Hz",
             _ => "UNKNOWN"
         };
+    }
+    
+    private static void DebugFrame(ushort[] frame)
+    {
+        Console.WriteLine("Thermal Frame:");
+        Console.Write("[");
+        for (int i = 0; i < TotRows; i++)
+        {
+            for (int j = 0; j < TotColumns; j++)
+            {
+                Console.Write(i * TotColumns + j < TotPixels - 1
+                    ? $"{frame[i * TotColumns + j]}, "
+                    : $"{frame[i * TotColumns + j]}");
+            }
+        }
+
+        Console.WriteLine("]");
+    }
+    
+    public enum RefreshRate: byte
+    {
+        _0_5_Hz = 0b000,
+        _1_Hz = 0b001,
+        _2_Hz = 0b010,
+        _4_Hz = 0b011,
+        _8_Hz = 0b100,
+        _16_Hz = 0b101,
+        _32_Hz = 0b110,
+        _64_Hz = 0b111
     }
 
     private sealed class ParamsMlx
@@ -1241,6 +1323,6 @@ public sealed class ThermalCamera : IDisposable
 
     public void Dispose()
     {
-        Device.Dispose();
+        _device.Dispose();
     }
 }
