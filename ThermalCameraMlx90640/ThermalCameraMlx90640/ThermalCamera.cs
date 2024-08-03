@@ -80,7 +80,7 @@ public sealed class ThermalCamera : IDisposable
 
         for (int i = 0; i < 2; i++) // first sub-page 0, then sub-page 1
         {
-            var subPageWatch = Stopwatch.StartNew();
+            // var subPageWatch = Stopwatch.StartNew();
 
             int status = await GetFrameData(frameData);
             if (status < 0)
@@ -88,19 +88,19 @@ public sealed class ThermalCamera : IDisposable
                 throw new IOException("error while getting data frame");
             }
             
-            Console.WriteLine($"it took {subPageWatch.ElapsedMilliseconds}ms to fetch sub-page {i}");
+            // Console.WriteLine($"it took {subPageWatch.ElapsedMilliseconds}ms to fetch sub-page {i}");
 
             var tr = GetTa(frameData) - 8;
-            Console.WriteLine($"Tr: {tr}, for calculating pixel To");
+            // Console.WriteLine($"Tr: {tr}, for calculating pixel To");
 
-            var toWatch = Stopwatch.StartNew();
+            // var toWatch = Stopwatch.StartNew();
             CalculateTo(frameData, emissivity, tr, frame);
-            Console.WriteLine($"it took {toWatch.ElapsedMilliseconds}ms to calculate To for pixels");
+            // Console.WriteLine($"it took {toWatch.ElapsedMilliseconds}ms to calculate To for pixels");
         }
 
         if (frameData.Take(TotPixels).Any(w => w == 0))
         {
-            Console.WriteLine("failed to populate both sub-pages");
+            // Console.WriteLine("failed to populate both sub-pages");
         }
 
         return frame;
@@ -112,7 +112,7 @@ public sealed class ThermalCamera : IDisposable
         ushort dataReady = 0;
         ushort statusWord = 0;
 
-        var dataReadyWatch = Stopwatch.StartNew();
+        // var dataReadyWatch = Stopwatch.StartNew();
         while (dataReady == 0)
         {
 
@@ -120,15 +120,15 @@ public sealed class ThermalCamera : IDisposable
             
             dataReady = (ushort)((statusWord >> 3) & 0b1);
         }
-        Console.WriteLine($"it took {dataReadyWatch.ElapsedMilliseconds}ms to fetch ready word from status register");
+        // Console.WriteLine($"it took {dataReadyWatch.ElapsedMilliseconds}ms to fetch ready word from status register");
 
-        Console.WriteLine("data ready ! :D");
+        // Console.WriteLine("data ready ! :D");
 
         while (dataReady != 0)
         {
-            var statusWriteWatch = Stopwatch.StartNew();
+            // var statusWriteWatch = Stopwatch.StartNew();
             status = await WriteInitValueToStatusRegister();
-            Console.WriteLine($"it took {statusWriteWatch.ElapsedMilliseconds}ms to write word to status register");
+            // Console.WriteLine($"it took {statusWriteWatch.ElapsedMilliseconds}ms to write word to status register");
 
             if (status < 0) // error !
             {
@@ -136,24 +136,24 @@ public sealed class ThermalCamera : IDisposable
             }
 
             // TODO investigate why it takes at least 150ms to read from RAM registers 
-            var ramWatch = Stopwatch.StartNew();
+            // var ramWatch = Stopwatch.StartNew();
             ReadWordsFromRegister(RamStartRegister, frameData);
-            Console.WriteLine($"it took {ramWatch.ElapsedMilliseconds}ms to fetch data from ram");
+            // Console.WriteLine($"it took {ramWatch.ElapsedMilliseconds}ms to fetch data from ram");
 
             // DebugFrame(frameData);
 
-            var statusWatch = Stopwatch.StartNew();
+            // var statusWatch = Stopwatch.StartNew();
             statusWord = ReadWordFromRegister(StatusRegister);
-            Console.WriteLine($"it took {statusWatch.ElapsedMilliseconds}ms to fetch word from status register");
+            // Console.WriteLine($"it took {statusWatch.ElapsedMilliseconds}ms to fetch word from status register");
 
             dataReady = (ushort)((statusWord >> 3) & 0b1);
         }
 
-        Console.WriteLine($"successfully read frame data from ram ! {DateTime.Now}");
+        // Console.WriteLine($"successfully read frame data from ram ! {DateTime.Now}");
 
-        var controlWatch = Stopwatch.StartNew();
+        // var controlWatch = Stopwatch.StartNew();
         var controlWord = ReadWordFromRegister(ControlRegister);
-        Console.WriteLine($"it took {controlWatch.ElapsedMilliseconds}ms to fetch word from control register");
+        // Console.WriteLine($"it took {controlWatch.ElapsedMilliseconds}ms to fetch word from control register");
 
         frameData[832] = controlWord;
         frameData[833] = (ushort)(statusWord & 0x0001);
@@ -161,20 +161,20 @@ public sealed class ThermalCamera : IDisposable
         status = ValidateFrameData(frameData);
         if (status != 0)
         {
-            Console.WriteLine("frame data validation failed");
+            // Console.WriteLine("frame data validation failed");
             return status;
         }
 
-        Console.WriteLine("successfully validated frame data");
+        // Console.WriteLine("successfully validated frame data");
 
         status = ValidateAuxData(frameData.Skip(TotPixels).Take(TotAuxData).ToArray());
         if (status != 0)
         {
-            Console.WriteLine("aux data validation failed");
+            // Console.WriteLine("aux data validation failed");
             return frameData[833];
         }
 
-        Console.WriteLine("successfully validated aux data");
+        // Console.WriteLine("successfully validated aux data");
 
         return frameData[833];
     }
@@ -236,8 +236,8 @@ public sealed class ThermalCamera : IDisposable
         float vdd = GetVdd(frameData);
         float ta = GetTa(frameData);
 
-        Console.WriteLine($"Vdd: {vdd}, for calculating pixel To");
-        Console.WriteLine($"Ta: {ta}, for calculating pixel To");
+        // Console.WriteLine($"Vdd: {vdd}, for calculating pixel To");
+        // Console.WriteLine($"Ta: {ta}, for calculating pixel To");
 
         float ta4 = ta + 273.15F;
         ta4 *= ta4;
@@ -256,10 +256,8 @@ public sealed class ThermalCamera : IDisposable
         alphaCorrR[2] = 1 + _mlx.KsTo[1] * _mlx.Ct[2];
         alphaCorrR[3] = alphaCorrR[2] * (1 + _mlx.KsTo[2] * (_mlx.Ct[3] - _mlx.Ct[2]));
 
-        //------------------------- Gain calculation -----------------------------------    
         float gain = (float)_mlx.GainEe / (short)frameData[778];
 
-        //------------------------- To calculation -------------------------------------    
         byte mode = (byte)((frameData[832] & 0x1000) >> 5);
 
         irDataCp[0] = (short)frameData[776] * gain;
@@ -417,11 +415,11 @@ public sealed class ThermalCamera : IDisposable
         ushort dataCheck = ReadWordFromRegister(StatusRegister);
         if (dataCheck == subPage0Check || dataCheck == subPage1Check)
         {
-            Console.WriteLine($"page {(dataCheck == subPage0Check ? "0" : "1")} has been measured");
+            // Console.WriteLine($"page {(dataCheck == subPage0Check ? "0" : "1")} has been measured");
             return dataCheck;
         }
 
-        Console.WriteLine($"data check failed, {dataCheck} != {subPage0Check} && {subPage1Check}");
+        // Console.WriteLine($"data check failed, {dataCheck} != {subPage0Check} && {subPage1Check}");
         return -2;
     }
 
