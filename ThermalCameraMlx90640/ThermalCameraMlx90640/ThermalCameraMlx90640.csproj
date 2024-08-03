@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <PackageId>ThermalCameraMlx90640</PackageId>
+        <Version>1.0.0</Version>
+        <Authors>Francesco Gramazio</Authors>
+        <Copyright>Francesco Gramazio</Copyright>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <RepositoryType>git</RepositoryType>
+        <RepositoryUrl>https://github.com/fragrama17/thermal-camera-MLX90640</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/fragrama17/thermal-camera-MLX90640/ThermalCameraMlx90640</PackageProjectUrl>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="System.Device.Gpio" Version="3.2.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="docs\README.md" Pack="true" PackagePath="\"/>
+    </ItemGroup>
+
+</Project>
