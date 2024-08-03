@@ -57,10 +57,8 @@ public sealed class ThermalCamera : IDisposable
 
         // Console.WriteLine(_mlx.ToString());
     }
-
-    /// <summary>
-    /// </summary>
-    /// <returns></returns>
+    
+    /// <returns>the current 24x32 thermal matrix</returns>
     /// <exception cref="IOException">if the driver fails to fetch the image</exception>
     public async Task<float[,]> GetImageAsMatrix()
     {
@@ -237,15 +235,15 @@ public sealed class ThermalCamera : IDisposable
 
     public enum RefreshRate : byte
     {
-        _0_5_Hz = 0b000,
-        _1_Hz = 0b001,
-        _2_Hz = 0b010,
-        _4_Hz = 0b011,
+        _0_5Hz = 0b000,
+        _1Hz = 0b001,
+        _2Hz = 0b010,
+        _4Hz = 0b011,
         // TODO try to unlock higher refresh-rates 
-        // _8_Hz = 0b100,
-        // _16_Hz = 0b101,
-        // _32_Hz = 0b110,
-        // _64_Hz = 0b111
+        // _8Hz = 0b100,
+        // _16Hz = 0b101,
+        // _32Hz = 0b110,
+        // _64Hz = 0b111
     }
 
     private void CalculateTo(ushort[] frameData, float emissivity, float tr, float[] result)

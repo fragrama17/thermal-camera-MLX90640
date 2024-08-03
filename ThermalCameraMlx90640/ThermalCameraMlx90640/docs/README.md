@@ -9,10 +9,10 @@ thermal frame.
 using var thermalCamera = new ThermalCamera();
 
 // Set desired refresh rate (2Hz which corresponds to 1fps)
-await thermalCamera.SetRefreshRate(ThermalCamera.RefreshRate._2_Hz);
+await thermalCamera.SetRefreshRate(ThermalCamera.RefreshRate._2Hz);
 
 // Get current frame
 var image = await thermalCamera.GetImage();
       
-// Process frame based on your needs     
+// Process frame based on your needs  
 ```

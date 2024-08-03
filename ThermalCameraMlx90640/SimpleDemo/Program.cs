@@ -8,7 +8,7 @@ public static class Program
     {
         var thermalCamera = new ThermalCamera();
         Console.WriteLine($"current refresh rate {thermalCamera.GetRefreshRate().ToString()}");
-        await thermalCamera.SetRefreshRate(ThermalCamera.RefreshRate._2_Hz);
+        await thermalCamera.SetRefreshRate(ThermalCamera.RefreshRate._2Hz);
         Console.WriteLine($"new refresh rate {thermalCamera.GetRefreshRate().ToString()}");
 
         Console.CancelKeyPress += (_, _) =>
