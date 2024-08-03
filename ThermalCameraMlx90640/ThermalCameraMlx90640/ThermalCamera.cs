@@ -23,9 +23,18 @@ public sealed class ThermalCamera : IDisposable
         AuxDataStartAddress = 0x0700,
         EePromStartAddress = 0x2400;
 
-    public ThermalCamera()
+    /// <summary>
+    /// This constructor initialises the I2cBus and the I2cDevice drivers in order to read from MLX90640 registers.
+    /// <br/>
+    /// It also extracts from eeprom the required MLX90640 parameters to calculate pixels final temperatures
+    /// </summary>
+    /// <param name="deviceAddress">the I2c device address to uniquely identify the device (default is 0x33 for MLX90640)</param>
+    /// <param name="busId">the I2c bus id to initialise (default is 1 for Raspberry Pi driver)</param>
+    /// <exception cref="PlatformNotSupportedException">if the os does not support the I2c driver</exception>
+    /// <exception cref="IOException">if I2C has not been enabled in the system config</exception>
+    public ThermalCamera(int deviceAddress = 0x33, int busId = 1)
     {
-        _device = I2cBus.Create(1).CreateDevice(0x33);
+        _device = I2cBus.Create(busId).CreateDevice(deviceAddress);
         _mlx = new ParamsMlx();
 
         var eepromData = new ushort[832];
@@ -49,6 +58,10 @@ public sealed class ThermalCamera : IDisposable
         // Console.WriteLine(_mlx.ToString());
     }
 
+    /// <summary>
+    /// </summary>
+    /// <returns></returns>
+    /// <exception cref="IOException">if the driver fails to fetch the image</exception>
     public async Task<float[,]> GetImageAsMatrix()
     {
         var image = await GetImage();
@@ -68,10 +81,11 @@ public sealed class ThermalCamera : IDisposable
 
     /// <summary>
     /// The main method that retrieves the current thermal image from the sensor.
-    /// The delay of this method is based on the current RefreshRate value set in the internal control register (EXAMPLE: 2Hz -> 1s; 4Hz -> 0.5s).
+    /// <br/>
+    /// The delay of this method is due to the current RefreshRate set in the internal control register (EXAMPLE: 2Hz -> 1s; 4Hz -> 0.5s).
     /// </summary>
     /// <returns>A task containing the array of 768 temperature pixels</returns>
-    /// <throws>IOException - if the driver fails to fetch the image</throws>
+    /// <exception cref="IOException">if the driver fails to fetch the image</exception>
     public async Task<float[]> GetImage()
     {
         float emissivity = 0.95F;
@@ -178,8 +192,15 @@ public sealed class ThermalCamera : IDisposable
 
         return frameData[833];
     }
+
+    public RefreshRate GetRefreshRate()
+    {
+        var word = ReadWordFromRegister(ControlRegister);
+
+        return (RefreshRate)((word >> 7) & 0b111);
+    }
     
-    public string GetRefreshRateToString()
+    public string GetRefreshRateToPrettyString()
     {
         var word = ReadWordFromRegister(ControlRegister);
 

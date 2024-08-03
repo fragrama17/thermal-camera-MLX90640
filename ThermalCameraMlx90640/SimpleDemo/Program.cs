@@ -7,11 +7,9 @@ public static class Program
     public static async Task Main(string[] args)
     {
         var thermalCamera = new ThermalCamera();
-
-        Console.WriteLine($"current refresh rate {thermalCamera.GetRefreshRateToString()}");
-
+        Console.WriteLine($"current refresh rate {thermalCamera.GetRefreshRate().ToString()}");
         await thermalCamera.SetRefreshRate(ThermalCamera.RefreshRate._2_Hz);
-        Console.WriteLine($"new refresh rate {thermalCamera.GetRefreshRateToString()}");
+        Console.WriteLine($"new refresh rate {thermalCamera.GetRefreshRate().ToString()}");
 
         Console.CancelKeyPress += (_, _) =>
         {
