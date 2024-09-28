@@ -23,8 +23,8 @@ var image = await thermalCamera.GetImage();
 dotnet add package ThermalCameraMlx90640 --version 1.0.0
 ```
 
-### Compile your project for linux arm64
-#### (or 32 bit, based on your device architecture)
+### Compile your project for linux arm (32 bit)
+#### (or 64 bit, based on your device architecture)
 ```shell
-dotnet publish --runtime linux-arm64 --self-contained  
+dotnet publish --runtime linux-arm --self-contained  
 ```
