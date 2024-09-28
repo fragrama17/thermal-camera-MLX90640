@@ -4,12 +4,24 @@ using System.Text;
 
 namespace ThermalCameraMlx90640;
 
+/**
+ * The wrapper class to retrieve the current thermal frame from MLX90640
+ */
 public sealed class ThermalCamera : IDisposable
 {
     private readonly I2cDevice _device;
     private readonly ParamsMlx _mlx;
+    /**
+     * Total available pixels in the thermal matrix
+     */
     public const int TotPixels = 768;
+    /**
+     * Total columns of the thermal matrix
+     */
     public const int TotColumns = 32;
+    /**
+     * Total rows of the thermal matrix
+    */
     public const int TotRows = 24;
     private const int TotAuxData = 64;
     private const int FrameDataError = -8;
@@ -191,6 +203,9 @@ public sealed class ThermalCamera : IDisposable
         return frameData[833];
     }
 
+    /**
+     * Get the byte from control register representing the current refresh rate of the sensor
+     */
     public RefreshRate GetRefreshRate()
     {
         var word = ReadWordFromRegister(ControlRegister);
@@ -198,6 +213,9 @@ public sealed class ThermalCamera : IDisposable
         return (RefreshRate)((word >> 7) & 0b111);
     }
     
+    /**
+     * Get from control register the current refresh rate of the sensor prettified
+     */
     public string GetRefreshRateToPrettyString()
     {
         var word = ReadWordFromRegister(ControlRegister);
@@ -207,6 +225,10 @@ public sealed class ThermalCamera : IDisposable
         return RefreshRateToPrettyString(refreshRate);
     }
 
+    /**
+     * Set a new refresh rate on the thermal camera device.
+     * This operation takes at least 1ms, therefore the async keyword
+     */
     public async Task SetRefreshRate(RefreshRate refreshRate)
     {
         ushort controlWord = ReadWordFromRegister(ControlRegister);
@@ -233,11 +255,28 @@ public sealed class ThermalCamera : IDisposable
         };
     }
 
+    /**
+     * The programmable refresh rate of the thermal camera (2Hz -> 1fps, 4Hz -> 2fps ecc).
+     *
+     * Note that the sensor needs to populate 2 sub-pages of the matrix, therefore delay is doubled 
+     */
     public enum RefreshRate : byte
     {
+        /**
+         * Available frame every 4s 
+         */
         _0_5Hz = 0b000,
+        /**
+         * Available frame every 2s
+         */
         _1Hz = 0b001,
+        /**
+         * Available frame every 1s
+         */
         _2Hz = 0b010,
+        /**
+         * Available frame every 0.5s
+         */
         _4Hz = 0b011,
         // TODO try to unlock higher refresh-rates 
         // _8Hz = 0b100,
@@ -1146,6 +1185,9 @@ public sealed class ThermalCamera : IDisposable
         }
     }
 
+    /**
+     * Dispose the I2c bus connected to the thermal camera device
+     */
     public void Dispose()
     {
         _device.Dispose();

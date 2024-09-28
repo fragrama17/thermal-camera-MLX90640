@@ -5,8 +5,9 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <PackageId>ThermalCameraMlx90640</PackageId>
-        <PackageIconUrl>thermal-camera.png</PackageIconUrl>
-        <Version>1.0.0</Version>
+        <PackageIcon>thermal-camera.png</PackageIcon>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <Version>1.1.0</Version>
         <Authors>Francesco Gramazio</Authors>
         <Copyright>Francesco Gramazio</Copyright>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -17,11 +18,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="System.Device.Gpio" Version="3.2.0" />
+        <PackageReference Include="System.Device.Gpio" Version="3.2.0"/>
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="docs\README.md" Pack="true" PackagePath="\"/>
+        <None Include="thermal-camera.png" Pack="true" PackagePath="\"/>
+        <None Include="README.md" Pack="true" PackagePath="\"/>
+        <None Include="$(OutputPath)ThermalCameraMlx90640.xml" Pack="true" PackagePath="\"/>
     </ItemGroup>
 
 </Project>
