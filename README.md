@@ -16,12 +16,14 @@ This repo contains drivers to interface MLX90640 infra-red array sensor in order
   - we should not exclude a potential Linux I²C driver limitation
 
 
-## Support the project
+## Support the project 🙏🏼
 If you’ve found this project helpful or enjoy using it, I’d be incredibly grateful for your support! Your contributions help keep the development going and ensure continued improvements. If you'd like to show your appreciation, consider making a donation:
 
 - [<img src="paypal.png" width="32">](https://paypal.me/fragrama17?country.x=IT&locale.x=it_IT) paypal [link](https://paypal.me/fragrama17?country.x=IT&locale.x=it_IT)
 - <img src="westpac.png" width="32"> BSB: 732-250, Account Number: 754415
 - <img src="sepa.jpeg" width="80"> IBAN: IT55 T036 4601 6005 2650
+
+or even a star would be greatly appreciated ⭐
 
 ## Thanks
 Special thanks to [Melexis](https://github.com/melexis) for providing the MLX90640 sensor documentation and [Adafruit](https://github.com/adafruit) for offering valuable templates and resources that helped inspire and guide the development of this driver.
