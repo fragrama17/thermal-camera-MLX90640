@@ -1,6 +1,10 @@
 # thermal-camera-MLX90640
 This repo contains drivers to interface MLX90640 infra-red array sensor in order to get current the thermal frame and configure certain parameters.
 
+### Demo
+There's a minimal [React App](thermal-camera-viewer/README.md) for receiving frame through [websocket](ThermalCameraMlx90640/ThermalCameraStream/Program.cs) and for rendering the thermal frame using a **canvas**
+![Demo](thermal-camera-viewer.gif)
+
 ## Content List
 * [MLX90640 datasheet](docs/MLX90640-Datasheet-Melexis.pdf)
 * [MLX90640 driver documentation](docs/MLX90640%20driver.pdf)
@@ -16,7 +20,7 @@ This repo contains drivers to interface MLX90640 infra-red array sensor in order
   - we should not exclude a potential Linux I²C driver limitation
 
 
-## Support the project 🙏🏼
+## Support the project  🙏🏼 ⭐
 If you’ve found this project helpful or enjoy using it, I’d be incredibly grateful for your support! Your contributions help keep the development going and ensure continued improvements. If you'd like to show your appreciation, consider making a donation:
 
 - [<img src="paypal.png" width="32">](https://paypal.me/fragrama17?country.x=IT&locale.x=it_IT) paypal [link](https://paypal.me/fragrama17?country.x=IT&locale.x=it_IT)
