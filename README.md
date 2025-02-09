@@ -8,7 +8,7 @@ There's a minimal [React App](thermal-camera-viewer/src/App.tsx) for receiving t
 ## Content List
 * [MLX90640 datasheet](docs/MLX90640-Datasheet-Melexis.pdf)
 * [MLX90640 driver documentation](docs/MLX90640%20driver.pdf)
-* [.NET driver](ThermalCameraMlx90640/ThermalCameraMlx90640/README.md) (using the Linux I²C driver)
+* [.NET driver](ThermalCameraMlx90640/ThermalCameraMlx90640) (using the Linux I²C driver)
 * Coming soon:
   * Nodejs driver (using the Linux I²C driver)
   * Rust user space driver (using the Linux I²C driver thanks to [rust-i2cdev](https://github.com/rust-embedded/rust-i2cdev))
