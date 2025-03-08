@@ -180,7 +180,7 @@ impl ThermalCamera {
 
         register_buffer[0] = (register >> 8) as u8;
         register_buffer[1] = (register & 0xFF) as u8;
-
+        // FIXME this logic doesn't work for reading from register, see transfer method at this example https://github.com/rust-embedded/rust-i2cdev/blob/master/examples/pca9956b.rs
         let _ = self.device.write(&mut register_buffer);
 
         let _ = self.device.read(&mut read_buffer);
