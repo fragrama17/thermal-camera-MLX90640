@@ -1,4 +1,4 @@
-﻿use linux_thermal_camera_mlx90640::ThermalCamera;
+﻿use linux_thermal_camera_mlx90640::{RefreshRate, ThermalCamera};
 
 fn main() {
     println!("and here we go, doing awesome things in rust ! ;D");
@@ -10,13 +10,10 @@ fn main() {
 
     println!("current refresh rate {:?}", refresh_rate);
 
-    // println!("trying to get the image");
+    thermal_camera.set_refresh_rate(RefreshRate::_4Hz);
 
-    // let image = thermal_camera.get_image();
+    let new_refresh_rate = thermal_camera.get_refresh_rate();
 
-    // for pixel in image{
+    println!("new refresh rate {:?}", new_refresh_rate);
 
-    //     println!("{}", pixel)
-
-    // }
 }

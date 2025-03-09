@@ -1,5 +1,5 @@
-use i2cdev::core::I2CDevice;
-use i2cdev::linux::LinuxI2CDevice;
+use i2cdev::core::{I2CDevice, I2CTransfer};
+use i2cdev::linux::{I2CMessage, LinuxI2CDevice, LinuxI2CMessage};
 
 pub struct ThermalCamera {
     address: u16,
@@ -12,7 +12,6 @@ pub struct ThermalCamera {
  *
  * Note that the sensor needs to populate 2 sub-pages of the matrix, therefore delay is doubled
  */
-#[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum RefreshRate {
     /**
@@ -31,6 +30,20 @@ pub enum RefreshRate {
      * Available frame every 0.5s
      */
     _4Hz = 0b011,
+}
+
+impl TryFrom<u8> for RefreshRate {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(RefreshRate::_0_5Hz),
+            1 => Ok(RefreshRate::_1Hz),
+            2 => Ok(RefreshRate::_2Hz),
+            3 => Ok(RefreshRate::_4Hz),
+            _ => Err(()),
+        }
+    }
 }
 
 const STATUS_REGISTER: u16 = 0x8000;
@@ -56,16 +69,26 @@ impl ThermalCamera {
             bus_id,
             device: LinuxI2CDevice::new(format!("/dev/i2c-{}", bus_id), address).unwrap(),
         }
+
+        // TODO read from eeprom registers to init constants for To calculation
     }
 
     pub fn get_image(&self) -> [f32; 768] {
         [0.0; 768]
     }
 
-    pub fn get_refresh_rate(&mut self) -> u8 {
+    pub fn get_refresh_rate(&mut self) -> RefreshRate {
         let word = self.read_word_from_register(CONTROL_REGISTER);
 
-        (word >> 7 & 0b111) as u8
+        RefreshRate::try_from((word >> 7 & 0b111) as u8).unwrap()
+    }
+
+    pub fn set_refresh_rate(&mut self, refresh_rate: RefreshRate) {
+        let control_word = self.read_word_from_register(CONTROL_REGISTER);
+        let new_refresh_rate = (refresh_rate as u16) << 7;
+        let new_control_word = new_refresh_rate | (control_word & 0xFC7F);  // 0b1111110001111111, the 3 bit set to 0 to merge | with new refresh-rate
+
+        self.write_word_to_register(CONTROL_REGISTER, new_control_word);
     }
 
     fn get_frame_data(&mut self, frame_data: &mut [u16; 834]) -> i32 {
@@ -146,6 +169,8 @@ impl ThermalCamera {
         let sub_page0check = 0x10;
         let sub_page1check = 0x11;
 
+        // TODO test if transfer method can fix slow frame-rate limit
+
         self.write_word_to_register(STATUS_REGISTER, init_word);
 
         let data_check = self.read_word_from_register(STATUS_REGISTER);
@@ -180,9 +205,10 @@ impl ThermalCamera {
 
         register_buffer[0] = (register >> 8) as u8;
         register_buffer[1] = (register & 0xFF) as u8;
-        // FIXME this logic doesn't work for reading from register, see transfer method at this example https://github.com/rust-embedded/rust-i2cdev/blob/master/examples/pca9956b.rs
-        let _ = self.device.write(&mut register_buffer);
 
-        let _ = self.device.read(&mut read_buffer);
+        let _ = self.device.transfer(&mut [
+            LinuxI2CMessage::write(&mut register_buffer).with_address(self.address),
+            LinuxI2CMessage::read(&mut read_buffer).with_address(self.address),
+        ]);
     }
 }
