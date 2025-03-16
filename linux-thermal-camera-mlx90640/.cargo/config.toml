@@ -4,4 +4,4 @@ linker = "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-linux-gnueabihf\\1
 #linker = "C:\\Program Files (x86)\\Arm GNU Toolchain aarch64-none-linux-gnu\\13.3 rel1\\bin\\aarch64-none-linux-gnu-gcc.exe"
 
 [build]
-target = "armv7-unknown-linux-gnueabihf" #Or whatever triplet you use
+target = "armv7-unknown-linux-gnueabihf" # so that compiler knows that is linux target

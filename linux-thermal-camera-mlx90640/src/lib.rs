@@ -1,3 +1,7 @@
+use std::io;
+use std::io::Error;
+use std::thread::sleep;
+use std::time::Duration;
 use i2cdev::core::{I2CDevice, I2CTransfer};
 use i2cdev::linux::{I2CMessage, LinuxI2CDevice, LinuxI2CMessage};
 
@@ -30,6 +34,22 @@ pub enum RefreshRate {
      * Available frame every 0.5s
      */
     _4Hz = 0b011,
+    /**
+     * Available frame every 0.25s
+     */
+    _8Hz = 0b100,
+    /**
+     * Available frame every 0.125s
+     */
+    _16Hz = 0b101,
+    /**
+     * Available frame every 0.125s
+     */
+    _32Hz = 0b110,
+    /**
+     * Available frame every 0.0625s
+     */
+    _64Hz = 0b111,
 }
 
 impl TryFrom<u8> for RefreshRate {
@@ -41,6 +61,10 @@ impl TryFrom<u8> for RefreshRate {
             1 => Ok(RefreshRate::_1Hz),
             2 => Ok(RefreshRate::_2Hz),
             3 => Ok(RefreshRate::_4Hz),
+            4 => Ok(RefreshRate::_8Hz),
+            5 => Ok(RefreshRate::_16Hz),
+            6 => Ok(RefreshRate::_32Hz),
+            7 => Ok(RefreshRate::_64Hz),
             _ => Err(()),
         }
     }
@@ -55,7 +79,7 @@ const AUX_DATA_START_ADDRESS: u16 = 0x0700;
 const EE_PROM_START_ADDRESS: u16 = 0x2400;
 
 const FRAME_SIZE: usize = 834;
-const TOT_PIXELS: i32 = 768;
+const TOT_PIXELS: usize = 768;
 const TOT_COLUMNS: usize = 32;
 const TOT_ROWS: usize = 24;
 
@@ -73,25 +97,38 @@ impl ThermalCamera {
         // TODO read from eeprom registers to init constants for To calculation
     }
 
-    pub fn get_image(&self) -> [f32; 768] {
-        [0.0; 768]
+    pub fn get_image(&mut self) -> Result<[f32; TOT_PIXELS], Error> {
+        let emissivity = 0.95;
+        let mut frame_data = [0u16; FRAME_SIZE];
+        let mut frame = [0.0f32; TOT_PIXELS];
+
+        for i in 0..2 { // first sub-page 0, then sub-page 1
+            println!("getting sub-page {}", i);
+            // Fetch the frame data asynchronously
+            let status = self.get_frame_data(&mut frame_data);
+
+            if status < 0 {
+                return Err(Error::new(io::ErrorKind::Other, "error while getting data frame"));
+            }
+
+            // let tr = get_ta(&frame_data) - 8.0;
+
+            // Calculate To for pixels
+            // calculate_to(&frame_data, emissivity, tr, &mut frame);
+        }
+
+        if frame_data.iter().take(TOT_PIXELS).any(|&w| w == 0) {
+            println!("Failed to populate both sub-pages");
+        }
+
+        for i in 0..TOT_PIXELS {
+            frame[i] = frame_data[i] as f32;
+        }
+
+        Ok(frame)
     }
 
-    pub fn get_refresh_rate(&mut self) -> RefreshRate {
-        let word = self.read_word_from_register(CONTROL_REGISTER);
-
-        RefreshRate::try_from((word >> 7 & 0b111) as u8).unwrap()
-    }
-
-    pub fn set_refresh_rate(&mut self, refresh_rate: RefreshRate) {
-        let control_word = self.read_word_from_register(CONTROL_REGISTER);
-        let new_refresh_rate = (refresh_rate as u16) << 7;
-        let new_control_word = new_refresh_rate | (control_word & 0xFC7F);  // 0b1111110001111111, the 3 bit set to 0 to merge | with new refresh-rate
-
-        self.write_word_to_register(CONTROL_REGISTER, new_control_word);
-    }
-
-    fn get_frame_data(&mut self, frame_data: &mut [u16; 834]) -> i32 {
+    fn get_frame_data(&mut self, frame_data: &mut [u16; FRAME_SIZE]) -> i32 {
         let mut status;
         let mut data_ready: u16 = 0;
         let mut status_word: u16 = 0;
@@ -138,6 +175,20 @@ impl ThermalCamera {
         return frame_data[833] as i32;
     }
 
+    pub fn get_refresh_rate(&mut self) -> RefreshRate {
+        let word = self.read_word_from_register(CONTROL_REGISTER);
+
+        RefreshRate::try_from((word >> 7 & 0b111) as u8).unwrap()
+    }
+
+    pub fn set_refresh_rate(&mut self, refresh_rate: RefreshRate) {
+        let control_word = self.read_word_from_register(CONTROL_REGISTER);
+        let new_refresh_rate = (refresh_rate as u16) << 7;
+        let new_control_word = new_refresh_rate | (control_word & 0xFC7F);  // 0b1111110001111111, the 3 bit set to 0 to merge | with new refresh-rate
+
+        self.write_word_to_register(CONTROL_REGISTER, new_control_word);
+    }
+
     fn validate_frame_data(frame_data: &[u16; 834]) -> i32 {
         let mut line = 0;
 
@@ -172,6 +223,8 @@ impl ThermalCamera {
         // TODO test if transfer method can fix slow frame-rate limit
 
         self.write_word_to_register(STATUS_REGISTER, init_word);
+
+        sleep(Duration::from_millis(1));
 
         let data_check = self.read_word_from_register(STATUS_REGISTER);
         if data_check == sub_page0check || data_check == sub_page1check {
