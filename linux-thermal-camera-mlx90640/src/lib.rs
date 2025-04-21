@@ -9,6 +9,7 @@ pub struct ThermalCamera {
     address: u16,
     bus_id: i32,
     device: LinuxI2CDevice,
+    params_mlx: ParamsMlx
 }
 
 /**
@@ -92,9 +93,20 @@ impl ThermalCamera {
             address,
             bus_id,
             device: LinuxI2CDevice::new(format!("/dev/i2c-{}", bus_id), address).unwrap(),
+            params_mlx: ParamsMlx::default()
         }
+    }
 
+    pub fn init_parameters(&mut self) {
         // TODO read from eeprom registers to init constants for To calculation
+        let mut eeprom_data = [0u16; 832];
+        self.read_words_from_register(EE_PROM_START_ADDRESS, &mut eeprom_data);
+        self.params_mlx.extract_vdd_parameters(&eeprom_data);
+        self.params_mlx.extract_ptat_parameters(&eeprom_data);
+        self.params_mlx.extract_gain_parameters(&eeprom_data);
+        self.params_mlx.extract_tgc_parameters(&eeprom_data);
+        self.params_mlx.extract_resolution_parameters(&eeprom_data);
+        self.params_mlx.extract_ks_ta_parameters(&eeprom_data);
     }
 
     pub fn get_image(&mut self) -> Result<[f32; TOT_PIXELS], Error> {
@@ -263,5 +275,120 @@ impl ThermalCamera {
             LinuxI2CMessage::write(&mut register_buffer).with_address(self.address),
             LinuxI2CMessage::read(&mut read_buffer).with_address(self.address),
         ]);
+    }
+}
+
+struct ParamsMlx {
+    pub k_vdd: i16,
+    pub vdd25: i16,
+    pub kv_ptat: f32,
+    pub kt_ptat: f32,
+    pub vp_tat25: u16,
+    pub alpha_ptat: f32,
+    pub gain_ee: i16,
+    pub tgc: f32,
+    pub cp_kv: f32,
+    pub cp_kta: f32,
+    pub resolution_ee: u8,
+    pub calibration_mode_ee: u8,
+    pub ks_ta: f32,
+    pub ks_to: [f32; 5],
+    pub ct: [i16; 5],
+    pub alpha: [u16; 768],
+    pub alpha_scale: u8,
+    pub offset: [i16; 768],
+    pub kta: [i8; 768],
+    pub kta_scale: u8,
+    pub kv: [i8; 768],
+    pub kv_scale: u8,
+    pub cp_alpha: [f32; 2],
+    pub cp_offset: [i16; 2],
+    pub il_chess_c: [f32; 3],
+    pub broken_pixels: [u16; 5],
+    pub outlier_pixels: [u16; 5],
+}
+
+impl ParamsMlx {
+    fn extract_vdd_parameters(&mut self, eeprom_data: &[u16]) {
+        let k_vdd = ((eeprom_data[51] & 0xFF00) >> 8) as i8;
+        let mut vdd25 = (eeprom_data[51] & 0x00FF) as i16;
+        vdd25 = ((vdd25 - 256) << 5) - 8192;
+
+        self.k_vdd = 32 * k_vdd as i16;
+        self.vdd25 = vdd25;
+    }
+
+    fn extract_ptat_parameters(&mut self, ee_data: &[u16]) {
+        let mut kv_ptat = ((ee_data[50] & 0xFC00) >> 10) as f32;
+        if kv_ptat > 31.0 {
+            kv_ptat -= 64.0;
+        }
+        kv_ptat /= 4096.0;
+
+        let mut kt_ptat = (ee_data[50] & 0x03FF) as f32;
+        if kt_ptat > 511.0 {
+            kt_ptat -= 1024.0;
+        }
+        kt_ptat /= 8.0;
+
+        let v_ptat25 = ee_data[49];
+        let alpha_ptat = ((ee_data[16] & 0xF000) as f32 / 2f32.powf(14.0)) + 8.0;
+
+        self.kv_ptat = kv_ptat;
+        self.kt_ptat = kt_ptat;
+        self.vp_tat25 = v_ptat25;
+        self.alpha_ptat = alpha_ptat;
+    }
+
+    fn extract_gain_parameters(&mut self, ee_data: &[u16]) {
+        self.gain_ee = ee_data[48] as i16;
+    }
+
+    fn extract_tgc_parameters(&mut self, ee_data: &[u16]) {
+        // what a hell was this
+        // self.tgc = (ee_data[60] as i8 & 0x00FF) as f32 / 32.0;
+        self.tgc = (ee_data[60] as u8 & 0xFF) as f32 / 32.0;
+    }
+
+    fn extract_resolution_parameters(&mut self, ee_data: &[u16]) {
+        self.resolution_ee = ((ee_data[56] & 0x3000) >> 12) as u8;
+    }
+
+    fn extract_ks_ta_parameters(&mut self, ee_data: &[u16]) {
+        self.ks_ta = (((ee_data[60] & 0xFF00) >> 8) as i8) as f32 / 8192.0;
+    }
+}
+
+impl Default for ParamsMlx {
+    fn default() -> Self {
+        Self {
+            k_vdd: 0,
+            vdd25: 0,
+            kv_ptat: 0.0,
+            kt_ptat: 0.0,
+            vp_tat25: 0,
+            alpha_ptat: 0.0,
+            gain_ee: 0,
+            tgc: 0.0,
+            cp_kv: 0.0,
+            cp_kta: 0.0,
+            resolution_ee: 0,
+            calibration_mode_ee: 0,
+            ks_ta: 0.0,
+            ks_to: [0.0; 5],
+            ct: [0; 5],
+            alpha: [0; 768],
+            alpha_scale: 10,
+            offset: [0; 768],
+            kta: [0; 768],
+            kta_scale: 0,
+            kv: [0; 768],
+            kv_scale: 7,
+            cp_alpha: [0.0; 2],
+            cp_offset: [0; 2],
+            il_chess_c: [0.0; 3],
+            broken_pixels: [0; 5],
+            outlier_pixels: [0; 5],
+        }
     }
 }
