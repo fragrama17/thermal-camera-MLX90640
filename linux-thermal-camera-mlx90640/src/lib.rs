@@ -357,6 +357,27 @@ impl ParamsMlx {
     fn extract_ks_ta_parameters(&mut self, ee_data: &[u16]) {
         self.ks_ta = (((ee_data[60] & 0xFF00) >> 8) as i8) as f32 / 8192.0;
     }
+
+    fn extract_ks_to_parameters(&mut self, ee_data: &[u16]) {
+        let step: u16 = ((ee_data[63] & 0x3000) >> 12) * 10;
+    
+        self.ct[0] = -40;
+        self.ct[1] = 0;
+        self.ct[2] = ((ee_data[63] & 0x00F0) >> 4) as i16;
+        self.ct[3] = ((ee_data[63] & 0x0F00) >> 8) as i16;
+    
+        self.ct[2] *= step as i16;
+        self.ct[3] = self.ct[2] + self.ct[3] * step as i16;
+        self.ct[4] = 400;
+    
+        let ks_to_scale = 1 << ((ee_data[63] & 0x000F) + 8);
+    
+        self.ks_to[0] = (ee_data[61] & 0x00FF) as i8 as f32 / ks_to_scale as f32;
+        self.ks_to[1] = ((ee_data[61] >> 8) & 0x00FF) as i8 as f32 / ks_to_scale as f32;
+        self.ks_to[2] = (ee_data[62] & 0x00FF) as i8 as f32 / ks_to_scale as f32;
+        self.ks_to[3] = ((ee_data[62] >> 8) & 0x00FF) as i8 as f32 / ks_to_scale as f32;
+        self.ks_to[4] = -0.0002;
+    }    
 }
 
 impl Default for ParamsMlx {
