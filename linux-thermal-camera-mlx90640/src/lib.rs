@@ -83,6 +83,7 @@ const FRAME_SIZE: usize = 834;
 const TOT_PIXELS: usize = 768;
 const TOT_COLUMNS: usize = 32;
 const TOT_ROWS: usize = 24;
+const SCALE_ALPHA: f32 = 0.000001;
 
 const FRAME_DATA_ERROR: i32 = -8;
 
@@ -378,6 +379,83 @@ impl ParamsMlx {
         self.ks_to[3] = ((ee_data[62] >> 8) & 0x00FF) as i8 as f32 / ks_to_scale as f32;
         self.ks_to[4] = -0.0002;
     }    
+
+    fn extract_alpha_parameters(&mut self, eed_data: &[u16]) {
+        let mut acc_row: [i32; 24] = [0; 24];
+        let mut acc_column: [i32; 32] = [0; 32];
+        let mut p: usize;
+        let mut alpha_temp: [f32; TOT_PIXELS] = [0.0; TOT_PIXELS]; 
+
+        let acc_rem_scale: u8 = (ee_data[32] & 0x000F) as u8;
+        let acc_column_scale: u8 = ((ee_data[32] & 0x00F0) >> 4) as u8;
+        let acc_row_scale: u8 = ((ee_data[32] & 0x0F00) >> 8) as u8;
+        let alpha_ref: i32 = ee_data[33] as i32;;
+
+        for i in 0..6 {
+            p = i * 4;
+            acc_row[p as usize+ 0] = ee_data[34 + i] & 0x00F;
+            acc_row[p as usize + 1] = (ee_data[34 + i] & 0x00F0) >> 4;
+            acc_row[p as usize + 2] = (ee_data[34 + i] & 0x0F00) >> 8;
+            acc_row[p as usize + 3] = (ee_data[34 + i] & 0xf000) >> 12;
+        }
+
+        for i in 0..TOT_ROWS {
+            if acc_row[i] > 7 {
+                acc_row[i] -= 16;
+            }
+        }
+
+        for i in 0..8 {
+            p = i * 4;
+            acc_column[p as usize + 0] = ee_data[40 + i] & 0x000F;
+            acc_column[p as usize + 1] = (ee_data[40 + i] & 0x00F0) >> 4;
+            acc_column[p as usize + 2] = (ee_data[40 + i] & 0x0F00) >> 8;
+            acc_column[p as usize + 3] = (ee_data[40 + i] & 0xF000) >> 12;
+        }
+
+        for i in 0..TOT_COLUMNS {
+            if acc_column[i] > 7 {
+                acc_column[i] -= 16;
+            }
+        }
+
+        for i in 0..TOT_ROWS {
+            for j in 0..TOT_COLUMNS {
+                p = 32 * i + j;
+                alpha_temp[p] = (ee_data[64 + p] & 0x03F0) >> 4;
+                if alpha_temp[p] > 31.0 {
+                    alpha_temp[p] -= 64.0;
+                }
+
+                alpha_temp[p] *= (1 << acc_rem_scale) as f32;
+                alpha_temp[p] = alpha_ref as f32 +
+                                (acc_row[i] << acc_row_scale) as f32 +
+                                (acc_column[j] << acc_column_scale) as f32 +
+                                alpha_temp[p];
+                alpha_temp[p] /= f32::powf(2.0, 4.0);
+                alpha_temp[p] -= self.tgc * (self.cp_alpha[0] + self.cp_alpha[1]) / 2.0;
+                alpha_temp[p] = SCALE_ALPHA / alpha_temp[p];
+            }
+        }
+
+        let mut temp: f32 = alpha_temp[0];
+        for i in 0..TOT_PIXELS {
+            if alpha_temp[i] > temp {
+                temp = alpha_temp[i];
+            }
+        }
+
+        let mut alpha_scale: u8 = 0; 
+        while temp < 32767.4 {
+            temp *= 2;
+            alpha_scale += 1;
+        }
+
+        for i in 0..TOT_PIXELS {
+            temp = alpha_temp[i] as f32 * f32::powf(2.0, alpha_scale as f32);
+            self.alpha[i] = (temp + 0.5) as u16;
+        }
+    }
 }
 
 impl Default for ParamsMlx {
