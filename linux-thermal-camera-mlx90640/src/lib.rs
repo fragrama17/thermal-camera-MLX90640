@@ -380,7 +380,7 @@ impl ParamsMlx {
         self.ks_to[4] = -0.0002;
     }    
 
-    fn extract_alpha_parameters(&mut self, eed_data: &[u16]) {
+    fn extract_alpha_parameters(&mut self, ee_data: &[u16]) {
         let mut acc_row: [i32; 24] = [0; 24];
         let mut acc_column: [i32; 32] = [0; 32];
         let mut p: usize;
@@ -454,6 +454,57 @@ impl ParamsMlx {
         for i in 0..TOT_PIXELS {
             temp = alpha_temp[i] as f32 * f32::powf(2.0, alpha_scale as f32);
             self.alpha[i] = (temp + 0.5) as u16;
+        }
+    }
+
+    fn extract_offset_parameters(&mut self, ee_data: &[u16]) {
+        let mut occ_row: [i32; 24] = [0; 24];
+        let mut occ_column: [i32; 32] = [0; 32];
+        let mut p: usize;
+
+        let occ_rem_scale = (ee_data[16] & 0x000F) as u8;
+        let occ_column_scale = ((ee_data[16] & 0x00F0) >> 4) as u8;
+        let occ_row_scale = ((ee_data[16] & 0x0F00) >> 8) as u8;
+        let offset_ref = ee_data[17] as i16;
+
+        for i in 0..6 {
+            p = i * 4;
+            occ_row[p + 0] = ee_data[18] & 0x000F;
+            occ_row[p + 1] = (ee_data[18] & 0x00F0) >> 4;
+            occ_row[p + 2] = (ee_data[18 + i] & 0x0F00) >> 8;
+            occ_row[p + 3] = (ee_data[18 + i] & 0xF000) >> 12;
+        }
+
+        for i in 0..TOT_ROWS {
+            if occ_row[i] > 7 {
+                occ_row[i] -= 16;
+            }
+        }
+
+        for i in 0..8 {
+            p = i * 4;
+            occ_column[p + 0] = ee_data[24 + i] & 0x000F;
+            occ_column[p + 1] = (ee_data[24 + i] & 0x00F0) >> 4;
+            occ_column[p + 2] = (ee_data[24 + i] & 0x0F00) >> 8;
+            occ_column[p + 3] = (ee_data[24 + i] & 0xF000) >> 12;
+        }
+
+        for i in 0..TOT_COLUMNS {
+            if occ_column[i] > 7 {
+                occ_column[i] -= 16;
+            }
+        }
+
+        for i in 0..TOT_ROWS {
+            for j in 0..TOT_COLUMNS {
+                p = 32 * i + j;
+                self.offset[p] = ((ee_data[64 + p] & 0xFC00) >> 10);
+                if self.offset[p] > 31 {
+                    self.offset[p] -= 64;
+                }
+                self.offset[p] *= (1 << occ_rem_scale) as i16;
+                self.offset[p] = (offset_ref + (occ_row[i] << occ_row_scale) + (occ_column[j] << occ_column_scale) + self.offset[p]) as i16;
+            }
         }
     }
 }
