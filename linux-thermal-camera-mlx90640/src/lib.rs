@@ -1,4 +1,4 @@
-use std::io;
+use std::{f64, io};
 use std::io::Error;
 use std::thread::sleep;
 use std::time::Duration;
@@ -96,8 +96,7 @@ impl ThermalCamera {
         }
     }
 
-    fn init_parameters(&mut self) {
-        // TODO read from eeprom registers to init constants for To calculation
+    pub fn init_parameters(&mut self) {
         let mut eeprom_data = [0u16; 832];
         self.read_words_from_register(EE_PROM_START_ADDRESS, &mut eeprom_data);
         self.params_mlx.extract_vdd_parameters(&eeprom_data);
@@ -109,6 +108,11 @@ impl ThermalCamera {
         self.params_mlx.extract_ks_to_parameters(&eeprom_data);
         self.params_mlx.extract_alpha_parameters(&eeprom_data);
         self.params_mlx.extract_offset_parameters(&eeprom_data);
+        self.params_mlx.extract_kta_pixel_parameters(&eeprom_data);
+        self.params_mlx.extract_kv_pixel_parameters(&eeprom_data);
+        self.params_mlx.extract_cp_parameters(&eeprom_data);
+        self.params_mlx.extract_cilc_parameters(&eeprom_data);
+        self.params_mlx.extract_deviating_pixels(&eeprom_data);
     }
 
     pub fn get_image(&mut self) -> Result<[f32; TOT_PIXELS], Error> {
@@ -125,10 +129,10 @@ impl ThermalCamera {
                 return Err(Error::new(io::ErrorKind::Other, "error while getting data frame"));
             }
 
-            // let tr = get_ta(&frame_data) - 8.0;
+            let tr = self.get_ta(&frame_data) - 8.0;
 
             // Calculate To for pixels
-            // calculate_to(&frame_data, emissivity, tr, &mut frame);
+            self.calculate_to(&frame_data, emissivity, tr, &mut frame);
         }
 
         if frame_data.iter().take(TOT_PIXELS).any(|&w| w == 0) {
@@ -155,6 +159,7 @@ impl ThermalCamera {
         }
 
         while data_ready != 0 {
+            // TODO what if init_value resets something and cause delays when increasing desired frame-rate ?
             status = self.write_init_value_to_status_register();
 
             if status < 0 {
@@ -208,7 +213,7 @@ impl ThermalCamera {
 
         for i in (0..TOT_PIXELS).step_by(TOT_COLUMNS)
         {
-            if frame_data[i as usize] == 0x7FFF && line % 2 == frame_data[833] {
+            if frame_data[i] == 0x7FFF && line % 2 == frame_data[833] {
                 return FRAME_DATA_ERROR;
             }
 
@@ -216,6 +221,113 @@ impl ThermalCamera {
         }
 
         return 0;
+    }
+
+    fn get_ta(&self, frame_data: &[u16]) -> f32 {
+        let vdd = self.get_vdd(frame_data);
+        let ptat = frame_data[800] as i16;
+
+        let ptat_art = (ptat as f32) / ((ptat as f32 * self.params_mlx.alpha_ptat) + (frame_data[768] as f32)) * 2f32.powf(18.0);
+
+        let mut ta = ptat_art / (1.0 + self.params_mlx.kv_ptat * (vdd - 3.3)) - (self.params_mlx.vp_tat25 as f32);
+        ta /= self.params_mlx.kt_ptat;
+        ta += 25.0;
+
+        ta
+    }
+    
+    fn get_vdd(&self, frame_data: &[u16]) -> f32 {
+        let vdd = frame_data[810] as i16;
+
+        let resolution_ram = ((frame_data[832] & 0x0C00) >> 10) as u8;
+        let resolution_correction = (f64::powi(2.0, self.params_mlx.resolution_ee as i32) / f64::powi(2.0, resolution_ram as i32)) as f32;
+
+        (resolution_correction * (vdd as f32) - (self.params_mlx.vdd25 as f32)) / (self.params_mlx.k_vdd as f32 + 3.3)
+    }
+
+    fn calculate_to(&mut self, frame_data: &[u16], emissivity: f32, tr: f32, result: &mut [f32]) {
+        let mut ir_data_cp = [0.0f32; 2];
+        let mut alpha_corr_r = [0.0f32; 4];
+
+        let sub_page = frame_data[833];
+        let vdd = self.get_vdd(frame_data);
+        let ta = self.get_ta(frame_data);
+
+        let mut ta4 = ta + 273.15;
+        ta4 *= ta4;
+        ta4 *= ta4;
+        let mut tr4 = tr + 273.15;
+        tr4 *= tr4;
+        tr4 *= tr4;
+        let ta_tr = tr4 - (tr4 - ta4) / emissivity;
+
+        let kta_scale = f32::powf(2.0, self.params_mlx.kta_scale as f32);
+        let kv_scale = f32::powf(2.0, self.params_mlx.kv_scale as f32);
+        let alpha_scale = f32::powf(2.0, self.params_mlx.alpha_scale as f32);
+
+        alpha_corr_r[0] = 1.0 / (1.0 + self.params_mlx.ks_to[0] * 40.0);
+        alpha_corr_r[1] = 1.0;
+        alpha_corr_r[2] = 1.0 + self.params_mlx.ks_to[1] * (self.params_mlx.ct[2] as f32);
+        alpha_corr_r[3] = alpha_corr_r[2] * (1.0 + self.params_mlx.ks_to[2] * ((self.params_mlx.ct[3] - self.params_mlx.ct[2]) as f32));
+
+        let gain = ((self.params_mlx.gain_ee) / frame_data[778] as i16) as f32;
+
+        let mode = (frame_data[832] & 0x1000) >> 5;
+
+        ir_data_cp[0] = frame_data[776] as f32 * gain;
+        ir_data_cp[1] = frame_data[808] as f32 * gain;
+
+        ir_data_cp[0] -= (self.params_mlx.cp_offset[0] as f32) * (1.0 + self.params_mlx.cp_kta * (ta - 25.0)) * (1.0 + self.params_mlx.cp_kv * (vdd - 3.3));
+        if mode == self.params_mlx.calibration_mode_ee as u16 {
+            ir_data_cp[1] -= (self.params_mlx.cp_offset[1] as f32) * (1.0 + self.params_mlx.cp_kta * (ta - 25.0)) * (1.0 + self.params_mlx.cp_kv * (vdd - 3.3));
+        } else {
+            ir_data_cp[1] -= ((self.params_mlx.cp_offset[1] as f32) + self.params_mlx.il_chess_c[0]) * (1.0 + self.params_mlx.cp_kta * (ta - 25.0)) * (1.0 + self.params_mlx.cp_kv * (vdd - 3.3));
+        }
+
+        for pixel_number in 0..TOT_PIXELS {
+            let il_pattern = (pixel_number / 32 - pixel_number / 64 * 2) as f32;
+            let chess_pattern = il_pattern.powf((pixel_number - pixel_number / 2 * 2) as f32);
+            let conversion_pattern = ((pixel_number + 2) / 4 - (pixel_number + 3) / 4 + (pixel_number + 1) / 4 - pixel_number / 4) as f32 * (1.0 - 2.0 * il_pattern);
+
+            let pattern = if mode == 0 { il_pattern } else { chess_pattern };
+
+            if pattern != frame_data[833] as f32 { continue; }
+
+            let mut ir_data = frame_data[pixel_number] as f32 * gain;
+
+            let kta = (self.params_mlx.kta[pixel_number] as f32) / kta_scale;
+            let kv = (self.params_mlx.kv[pixel_number] as f32) / kv_scale;
+            ir_data -= (self.params_mlx.offset[pixel_number] as f32) * (1.0 + kta * (ta - 25.0)) * (1.0 + kv * (vdd - 3.3));
+
+            if mode != self.params_mlx.calibration_mode_ee as u16 {
+                ir_data += self.params_mlx.il_chess_c[2] * (2.0 * il_pattern - 1.0) - self.params_mlx.il_chess_c[1] * conversion_pattern;
+            }
+
+            ir_data -= self.params_mlx.tgc * ir_data_cp[sub_page as usize];
+            ir_data /= emissivity;
+
+            let mut alpha_compensated = (self.params_mlx.alpha_scale as f32) * alpha_scale / self.params_mlx.alpha[pixel_number] as f32;
+            alpha_compensated *= 1.0 + self.params_mlx.ks_ta * (ta - 25.0);
+
+            let mut sx = alpha_compensated.powi(3) * (ir_data + alpha_compensated * ta_tr);
+            sx = f32::sqrt(f32::sqrt(sx)) * self.params_mlx.ks_to[1];
+
+            let mut to = f32::sqrt(f32::sqrt(ir_data / (alpha_compensated * (1.0 - self.params_mlx.ks_to[1] * 273.15) + sx) + ta_tr)) - 273.15;
+
+            let range = if to < self.params_mlx.ct[1] as f32 {
+                0
+            } else if to < self.params_mlx.ct[2] as f32 {
+                1
+            } else if to < self.params_mlx.ct[3] as f32 {
+                2
+            } else {
+                3
+            };
+
+            to = f32::sqrt(f32::sqrt(ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - (self.params_mlx.ct[range] as f32))) + ta_tr)) - 273.15);
+
+            result[pixel_number] = to;
+        }
     }
 
     fn read_words_from_register(&mut self, register: u16, words: &mut [u16])
@@ -394,10 +506,10 @@ impl ParamsMlx {
 
         for i in 0..6 {
             p = i * 4;
-            acc_row[p as usize+ 0] = (ee_data[34 + i] & 0x00F) as i32;
-            acc_row[p as usize + 1] = ((ee_data[34 + i] & 0x00F0) >> 4) as i32;
-            acc_row[p as usize + 2] = ((ee_data[34 + i] & 0x0F00) >> 8) as i32;
-            acc_row[p as usize + 3] = ((ee_data[34 + i] & 0xf000) >> 12) as i32;
+            acc_row[p + 0] = (ee_data[34 + i] & 0x00F) as i32;
+            acc_row[p + 1] = ((ee_data[34 + i] & 0x00F0) >> 4) as i32;
+            acc_row[p + 2] = ((ee_data[34 + i] & 0x0F00) >> 8) as i32;
+            acc_row[p + 3] = ((ee_data[34 + i] & 0xf000) >> 12) as i32;
         }
 
         for i in 0..TOT_ROWS {
@@ -408,10 +520,10 @@ impl ParamsMlx {
 
         for i in 0..8 {
             p = i * 4;
-            acc_column[p as usize + 0] = (ee_data[40 + i] & 0x000F) as i32;
-            acc_column[p as usize + 1] = ((ee_data[40 + i] & 0x00F0) >> 4) as i32;
-            acc_column[p as usize + 2] = ((ee_data[40 + i] & 0x0F00) >> 8) as i32;
-            acc_column[p as usize + 3] = ((ee_data[40 + i] & 0xF000) >> 12) as i32;
+            acc_column[p + 0] = (ee_data[40 + i] & 0x000F) as i32;
+            acc_column[p + 1] = ((ee_data[40 + i] & 0x00F0) >> 4) as i32;
+            acc_column[p + 2] = ((ee_data[40 + i] & 0x0F00) >> 8) as i32;
+            acc_column[p + 3] = ((ee_data[40 + i] & 0xF000) >> 12) as i32;
         }
 
         for i in 0..TOT_COLUMNS {
@@ -453,7 +565,7 @@ impl ParamsMlx {
         }
 
         for i in 0..TOT_PIXELS {
-            temp = alpha_temp[i] as f32 * f32::powf(2.0, alpha_scale as f32);
+            temp = alpha_temp[i] * f32::powf(2.0, alpha_scale as f32);
             self.alpha[i] = (temp + 0.5) as u16;
         }
     }
@@ -510,6 +622,282 @@ impl ParamsMlx {
             }
         }
     }
+
+    fn extract_kta_pixel_parameters(&mut self, ee_data: &[u16]) {
+        let mut kta_rc = [0i8; 4];
+        let mut kta_temp = [0f32; 768];
+
+        kta_rc[0] = ((ee_data[54] & 0xFF00) >> 8) as i8;
+        kta_rc[2] = (ee_data[54] & 0x00FF) as i8;
+        kta_rc[1] = ((ee_data[55] & 0xFF00) >> 8) as i8;
+        kta_rc[3] = (ee_data[55] & 0x00FF) as i8;
+
+        let mut kta_scale1 = ((ee_data[56] & 0x00F0) >> 4) as u8 + 8;
+        let kta_scale2 = (ee_data[56] & 0x000F) as u8;
+
+        for i in 0..TOT_ROWS {
+            for j in 0..TOT_COLUMNS {
+                let p = 32 * i + j;
+                let split = 2 * ((p / 32) - (p / 64) * 2) + (p % 2);
+                let mut temp_val = ((ee_data[64 + p] & 0x000E) >> 1) as f32;
+                if temp_val > 3.0 {
+                    temp_val -= 8.0;
+                }
+
+                temp_val *= (1 << kta_scale2) as f32;
+                temp_val = kta_rc[split] as f32 + temp_val;
+                kta_temp[p] = temp_val / 2f32.powi(kta_scale1 as i32);
+            }
+        }
+
+        let mut temp = kta_temp[0].abs();
+        for i in 1..TOT_PIXELS {
+            let abs_val = kta_temp[i].abs();
+            if abs_val > temp {
+                temp = abs_val;
+            }
+        }
+
+        kta_scale1 = 0;
+        let mut scale_temp = temp;
+        while scale_temp < 63.4 {
+            scale_temp *= 2.0;
+            kta_scale1 += 1;
+        }
+
+        for i in 0..TOT_PIXELS {
+            let val = kta_temp[i] * 2f32.powi(kta_scale1 as i32);
+            self.kta[i] = if val < 0.0 {
+                (val - 0.5).floor() as i8
+            } else {
+                (val + 0.5).floor() as i8
+            };
+        }
+
+        self.kta_scale = kta_scale1;
+    }
+
+    fn extract_kv_pixel_parameters(&mut self, ee_data: &[u16]) {
+        let mut kv_t = [0i8; 4];
+        let mut kv_temp = [0f32; TOT_PIXELS];
+
+        let mut kv_ro_co = ((ee_data[52] & 0xF000) >> 12) as i8;
+        if kv_ro_co > 7 {
+            kv_ro_co -= 16;
+        }
+        kv_t[0] = kv_ro_co;
+
+        let mut kv_re_co = ((ee_data[52] & 0x0F00) >> 8) as i8;
+        if kv_re_co > 7 {
+            kv_re_co -= 16;
+        }
+        kv_t[2] = kv_re_co;
+
+        let mut kv_ro_ce = ((ee_data[52] & 0x00F0) >> 4) as i8;
+        if kv_ro_ce > 7 {
+            kv_ro_ce -= 16;
+        }
+        kv_t[1] = kv_ro_ce;
+
+        let mut kv_re_ce = (ee_data[52] & 0x000F) as i8;
+        if kv_re_ce > 7 {
+            kv_re_ce -= 16;
+        }
+        kv_t[3] = kv_re_ce;
+
+        let mut kv_scale = ((ee_data[56] & 0x0F00) >> 8) as u8;
+
+        for i in 0..TOT_ROWS {
+            for j in 0..TOT_COLUMNS {
+                let p = 32 * i + j;
+                let split = 2 * ((p / 32) - (p / 64) * 2) + (p % 2);
+                kv_temp[p] = kv_t[split] as f32;
+                kv_temp[p] /= 2f32.powi(kv_scale as i32);
+            }
+        }
+
+        let mut temp = kv_temp[0].abs();
+        for i in 1..TOT_PIXELS {
+            let abs_val = kv_temp[i].abs();
+            if abs_val > temp {
+                temp = abs_val;
+            }
+        }
+
+        kv_scale = 0;
+        let mut scale_temp = temp;
+        while scale_temp < 63.4 {
+            scale_temp *= 2.0;
+            kv_scale += 1;
+        }
+
+        for i in 0..TOT_PIXELS {
+            let val = kv_temp[i] * 2f32.powi(kv_scale as i32);
+            self.kv[i] = if val < 0.0 {
+                (val - 0.5).floor() as i8
+            } else {
+                (val + 0.5).floor() as i8
+            };
+        }
+
+        self.kv_scale = kv_scale;
+    }
+
+    fn extract_cp_parameters(&mut self, ee_data: &[u16]) {
+        let mut alpha_sp = [0.0f32; 2];
+        let mut offset_sp = [0i16; 2];
+
+        let alpha_scale = ((ee_data[32] & 0xF000) >> 12) + 27;
+
+        offset_sp[0] = (ee_data[58] & 0x03FF) as i16;
+        if offset_sp[0] > 511 {
+            offset_sp[0] -= 1024;
+        }
+
+        offset_sp[1] = ((ee_data[58] & 0xFC00) >> 10) as i16;
+        if offset_sp[1] > 31 {
+            offset_sp[1] -= 64;
+        }
+        offset_sp[1] += offset_sp[0];
+
+        alpha_sp[0] = (ee_data[57] & 0x03FF) as f32;
+        if alpha_sp[0] > 511.0 {
+            alpha_sp[0] -= 1024.0;
+        }
+
+        alpha_sp[0] /= 2f32.powi(alpha_scale as i32);
+
+        alpha_sp[1] = ((ee_data[57] & 0xFC00) >> 10) as f32;
+        if alpha_sp[1] > 31.0 {
+            alpha_sp[1] -= 64.0;
+        }
+
+        alpha_sp[1] = (1.0 + alpha_sp[1] / 128.0) * alpha_sp[0];
+
+        let cp_kta = (ee_data[59] & 0x00FF) as i8;
+        let kta_scale1 = ((ee_data[56] & 0x00F0) >> 4) + 8;
+        self.cp_kta = cp_kta as f32 / 2f32.powi(kta_scale1 as i32);
+
+        let cp_kv = ((ee_data[59] & 0xFF00) >> 8) as i8;
+        let kv_scale = ((ee_data[56] & 0x0F00) >> 8) as i32;
+        self.cp_kv = cp_kv as f32 / 2f32.powi(kv_scale);
+
+        self.cp_alpha[0] = alpha_sp[0];
+        self.cp_alpha[1] = alpha_sp[1];
+        self.cp_offset[0] = offset_sp[0];
+        self.cp_offset[1] = offset_sp[1];
+    }
+
+    fn extract_cilc_parameters(&mut self, ee_data: &[u16]) {
+        let mut il_chess_c = [0.0f32; 3];
+
+        let mut calibration_mode_ee = ((ee_data[10] & 0x0800) >> 4) as u8;
+        calibration_mode_ee ^= 0x80;
+
+        il_chess_c[0] = (ee_data[53] & 0x003F) as f32;
+        if il_chess_c[0] > 31.0 {
+            il_chess_c[0] -= 64.0;
+        }
+        il_chess_c[0] /= 16.0;
+
+        il_chess_c[1] = ((ee_data[53] & 0x07C0) >> 6) as f32;
+        if il_chess_c[1] > 15.0 {
+            il_chess_c[1] -= 32.0;
+        }
+        il_chess_c[1] /= 2.0;
+
+        il_chess_c[2] = ((ee_data[53] & 0xF800) >> 11) as f32;
+        if il_chess_c[2] > 15.0 {
+            il_chess_c[2] -= 32.0;
+        }
+        il_chess_c[2] /= 8.0;
+
+        self.calibration_mode_ee = calibration_mode_ee;
+        self.il_chess_c.copy_from_slice(&il_chess_c);
+    }
+
+    fn extract_deviating_pixels(&mut self, ee_data: &[u16]) -> i32 {
+        let mut pix_cnt: usize;
+        let mut broken_pix_cnt: usize = 0;
+        let mut outlier_pix_cnt: usize = 0;
+        let mut warn = 0;
+
+        for i in 0..5 {
+            self.broken_pixels[i] = 0xFFFF;
+            self.outlier_pixels[i] = 0xFFFF;
+        }
+
+        pix_cnt = 0;
+        while pix_cnt < TOT_PIXELS && broken_pix_cnt < 5 && outlier_pix_cnt < 5 {
+            let pixel_val = ee_data[pix_cnt + 64];
+            if pixel_val == 0 {
+                self.broken_pixels[broken_pix_cnt] = pix_cnt as u16;
+                broken_pix_cnt += 1;
+            } else if (pixel_val & 0x0001) != 0 {
+                self.outlier_pixels[outlier_pix_cnt] = pix_cnt as u16;
+                outlier_pix_cnt += 1;
+            }
+
+            pix_cnt += 1;
+        }
+
+        if broken_pix_cnt > 4 {
+            warn = -3;
+        } else if outlier_pix_cnt > 4 {
+            warn = -4;
+        } else if (broken_pix_cnt + outlier_pix_cnt) > 4 {
+            warn = -5;
+        } else {
+            for i in 0..broken_pix_cnt {
+                for j in (i + 1)..broken_pix_cnt {
+                    warn = self.check_adjacent_pixels(self.broken_pixels[i], self.broken_pixels[j]);
+                    if warn != 0 {
+                        return warn;
+                    }
+                }
+            }
+
+            for i in 0..outlier_pix_cnt {
+                for j in (i + 1)..outlier_pix_cnt {
+                    warn = self.check_adjacent_pixels(self.outlier_pixels[i], self.outlier_pixels[j]);
+                    if warn != 0 {
+                        return warn;
+                    }
+                }
+            }
+
+            for i in 0..broken_pix_cnt {
+                for j in 0..outlier_pix_cnt {
+                    warn = self.check_adjacent_pixels(self.broken_pixels[i], self.outlier_pixels[j]);
+                    if warn != 0 {
+                        return warn;
+                    }
+                }
+            }
+        }
+
+        warn
+    }
+
+    fn check_adjacent_pixels(&self, pix1: u16, pix2: u16) -> i32 {
+        let lp1 = pix1 >> 5;
+        let lp2 = pix2 >> 5;
+        let cp1 = pix1 - (lp1 << 5);
+        let cp2 = pix2 - (lp2 << 5);
+
+        let mut pix_pos_dif = lp1 as i16 - lp2 as i16;
+        if pix_pos_dif <= -2 || pix_pos_dif >= 2 {
+            return 0;
+        }
+
+        pix_pos_dif = cp1 as i16 - cp2 as i16;
+        if pix_pos_dif > -2 && pix_pos_dif < 2 {
+            return -6;
+        }
+
+        0
+    }
+
 }
 
 impl Default for ParamsMlx {
