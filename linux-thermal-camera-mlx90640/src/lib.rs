@@ -7,7 +7,6 @@ use i2cdev::linux::{I2CMessage, LinuxI2CDevice, LinuxI2CMessage};
 
 pub struct ThermalCamera {
     address: u16,
-    bus_id: i32,
     device: LinuxI2CDevice,
     params_mlx: ParamsMlx
 }
@@ -92,13 +91,12 @@ impl ThermalCamera {
     pub fn new(address: u16, bus_id: i32) -> Self {
         Self {
             address,
-            bus_id,
             device: LinuxI2CDevice::new(format!("/dev/i2c-{}", bus_id), address).unwrap(),
             params_mlx: ParamsMlx::default()
         }
     }
 
-    pub fn init_parameters(&mut self) {
+    fn init_parameters(&mut self) {
         // TODO read from eeprom registers to init constants for To calculation
         let mut eeprom_data = [0u16; 832];
         self.read_words_from_register(EE_PROM_START_ADDRESS, &mut eeprom_data);
@@ -108,6 +106,9 @@ impl ThermalCamera {
         self.params_mlx.extract_tgc_parameters(&eeprom_data);
         self.params_mlx.extract_resolution_parameters(&eeprom_data);
         self.params_mlx.extract_ks_ta_parameters(&eeprom_data);
+        self.params_mlx.extract_ks_to_parameters(&eeprom_data);
+        self.params_mlx.extract_alpha_parameters(&eeprom_data);
+        self.params_mlx.extract_offset_parameters(&eeprom_data);
     }
 
     pub fn get_image(&mut self) -> Result<[f32; TOT_PIXELS], Error> {
@@ -389,14 +390,14 @@ impl ParamsMlx {
         let acc_rem_scale: u8 = (ee_data[32] & 0x000F) as u8;
         let acc_column_scale: u8 = ((ee_data[32] & 0x00F0) >> 4) as u8;
         let acc_row_scale: u8 = ((ee_data[32] & 0x0F00) >> 8) as u8;
-        let alpha_ref: i32 = ee_data[33] as i32;;
+        let alpha_ref: i32 = ee_data[33] as i32;
 
         for i in 0..6 {
             p = i * 4;
-            acc_row[p as usize+ 0] = ee_data[34 + i] & 0x00F;
-            acc_row[p as usize + 1] = (ee_data[34 + i] & 0x00F0) >> 4;
-            acc_row[p as usize + 2] = (ee_data[34 + i] & 0x0F00) >> 8;
-            acc_row[p as usize + 3] = (ee_data[34 + i] & 0xf000) >> 12;
+            acc_row[p as usize+ 0] = (ee_data[34 + i] & 0x00F) as i32;
+            acc_row[p as usize + 1] = ((ee_data[34 + i] & 0x00F0) >> 4) as i32;
+            acc_row[p as usize + 2] = ((ee_data[34 + i] & 0x0F00) >> 8) as i32;
+            acc_row[p as usize + 3] = ((ee_data[34 + i] & 0xf000) >> 12) as i32;
         }
 
         for i in 0..TOT_ROWS {
@@ -407,10 +408,10 @@ impl ParamsMlx {
 
         for i in 0..8 {
             p = i * 4;
-            acc_column[p as usize + 0] = ee_data[40 + i] & 0x000F;
-            acc_column[p as usize + 1] = (ee_data[40 + i] & 0x00F0) >> 4;
-            acc_column[p as usize + 2] = (ee_data[40 + i] & 0x0F00) >> 8;
-            acc_column[p as usize + 3] = (ee_data[40 + i] & 0xF000) >> 12;
+            acc_column[p as usize + 0] = (ee_data[40 + i] & 0x000F) as i32;
+            acc_column[p as usize + 1] = ((ee_data[40 + i] & 0x00F0) >> 4) as i32;
+            acc_column[p as usize + 2] = ((ee_data[40 + i] & 0x0F00) >> 8) as i32;
+            acc_column[p as usize + 3] = ((ee_data[40 + i] & 0xF000) >> 12) as i32;
         }
 
         for i in 0..TOT_COLUMNS {
@@ -422,7 +423,7 @@ impl ParamsMlx {
         for i in 0..TOT_ROWS {
             for j in 0..TOT_COLUMNS {
                 p = 32 * i + j;
-                alpha_temp[p] = (ee_data[64 + p] & 0x03F0) >> 4;
+                alpha_temp[p] = ((ee_data[64 + p] & 0x03F0) >> 4) as f32;
                 if alpha_temp[p] > 31.0 {
                     alpha_temp[p] -= 64.0;
                 }
@@ -447,7 +448,7 @@ impl ParamsMlx {
 
         let mut alpha_scale: u8 = 0; 
         while temp < 32767.4 {
-            temp *= 2;
+            temp *= 2.0;
             alpha_scale += 1;
         }
 
@@ -469,10 +470,10 @@ impl ParamsMlx {
 
         for i in 0..6 {
             p = i * 4;
-            occ_row[p + 0] = ee_data[18] & 0x000F;
-            occ_row[p + 1] = (ee_data[18] & 0x00F0) >> 4;
-            occ_row[p + 2] = (ee_data[18 + i] & 0x0F00) >> 8;
-            occ_row[p + 3] = (ee_data[18 + i] & 0xF000) >> 12;
+            occ_row[p + 0] = (ee_data[18] & 0x000F) as i32;
+            occ_row[p + 1] = ((ee_data[18] & 0x00F0) >> 4) as i32;
+            occ_row[p + 2] = ((ee_data[18 + i] & 0x0F00) >> 8) as i32;
+            occ_row[p + 3] = ((ee_data[18 + i] & 0xF000) >> 12) as i32;
         }
 
         for i in 0..TOT_ROWS {
@@ -483,10 +484,10 @@ impl ParamsMlx {
 
         for i in 0..8 {
             p = i * 4;
-            occ_column[p + 0] = ee_data[24 + i] & 0x000F;
-            occ_column[p + 1] = (ee_data[24 + i] & 0x00F0) >> 4;
-            occ_column[p + 2] = (ee_data[24 + i] & 0x0F00) >> 8;
-            occ_column[p + 3] = (ee_data[24 + i] & 0xF000) >> 12;
+            occ_column[p + 0] = (ee_data[24 + i] & 0x000F) as i32;
+            occ_column[p + 1] = ((ee_data[24 + i] & 0x00F0) >> 4) as i32;
+            occ_column[p + 2] = ((ee_data[24 + i] & 0x0F00) >> 8) as i32;
+            occ_column[p + 3] = ((ee_data[24 + i] & 0xF000) >> 12) as i32;
         }
 
         for i in 0..TOT_COLUMNS {
@@ -498,12 +499,14 @@ impl ParamsMlx {
         for i in 0..TOT_ROWS {
             for j in 0..TOT_COLUMNS {
                 p = 32 * i + j;
-                self.offset[p] = ((ee_data[64 + p] & 0xFC00) >> 10);
+                self.offset[p] = ((ee_data[64 + p] & 0xFC00) >> 10) as i16;
                 if self.offset[p] > 31 {
                     self.offset[p] -= 64;
                 }
                 self.offset[p] *= (1 << occ_rem_scale) as i16;
-                self.offset[p] = (offset_ref + (occ_row[i] << occ_row_scale) + (occ_column[j] << occ_column_scale) + self.offset[p]) as i16;
+                let row_plus_scale = (occ_row[i] << occ_row_scale) as i16;
+                let cols_plus_scale = (occ_column[j] << occ_column_scale) as i16;
+                self.offset[p] = offset_ref + row_plus_scale + cols_plus_scale + self.offset[p];
             }
         }
     }
