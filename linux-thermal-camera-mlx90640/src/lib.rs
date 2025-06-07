@@ -8,7 +8,7 @@ use i2cdev::linux::{I2CMessage, LinuxI2CDevice, LinuxI2CMessage};
 pub struct ThermalCamera {
     address: u16,
     device: LinuxI2CDevice,
-    params_mlx: ParamsMlx
+    pub params_mlx: ParamsMlx
 }
 
 /**
@@ -43,11 +43,11 @@ pub enum RefreshRate {
      */
     _16Hz = 0b101,
     /**
-     * Available frame every 0.125s
+     * Available frame every 0.0625s
      */
     _32Hz = 0b110,
     /**
-     * Available frame every 0.0625s
+     * Available frame every 0.03125s
      */
     _64Hz = 0b111,
 }
@@ -113,6 +113,9 @@ impl ThermalCamera {
         self.params_mlx.extract_cp_parameters(&eeprom_data);
         self.params_mlx.extract_cilc_parameters(&eeprom_data);
         self.params_mlx.extract_deviating_pixels(&eeprom_data);
+        self.params_mlx.alpha_scale = 10u8;
+        self.params_mlx.il_chess_c[1] = 3.5;
+        self.params_mlx.il_chess_c[2] = 0.125;
     }
 
     pub fn get_image(&mut self) -> Result<[f32; TOT_PIXELS], Error> {
@@ -131,16 +134,14 @@ impl ThermalCamera {
 
             let tr = self.get_ta(&frame_data) - 8.0;
 
+            println!("tr calculated: {}", tr);
+
             // Calculate To for pixels
             self.calculate_to(&frame_data, emissivity, tr, &mut frame);
         }
 
         if frame_data.iter().take(TOT_PIXELS).any(|&w| w == 0) {
             println!("Failed to populate both sub-pages");
-        }
-
-        for i in 0..TOT_PIXELS {
-            frame[i] = frame_data[i] as f32;
         }
 
         Ok(frame)
@@ -159,7 +160,6 @@ impl ThermalCamera {
         }
 
         while data_ready != 0 {
-            // TODO what if init_value resets something and cause delays when increasing desired frame-rate ?
             status = self.write_init_value_to_status_register();
 
             if status < 0 {
@@ -223,28 +223,6 @@ impl ThermalCamera {
         return 0;
     }
 
-    fn get_ta(&self, frame_data: &[u16]) -> f32 {
-        let vdd = self.get_vdd(frame_data);
-        let ptat = frame_data[800] as i16;
-
-        let ptat_art = (ptat as f32) / ((ptat as f32 * self.params_mlx.alpha_ptat) + (frame_data[768] as f32)) * 2f32.powf(18.0);
-
-        let mut ta = ptat_art / (1.0 + self.params_mlx.kv_ptat * (vdd - 3.3)) - (self.params_mlx.vp_tat25 as f32);
-        ta /= self.params_mlx.kt_ptat;
-        ta += 25.0;
-
-        ta
-    }
-    
-    fn get_vdd(&self, frame_data: &[u16]) -> f32 {
-        let vdd = frame_data[810] as i16;
-
-        let resolution_ram = ((frame_data[832] & 0x0C00) >> 10) as u8;
-        let resolution_correction = (f64::powi(2.0, self.params_mlx.resolution_ee as i32) / f64::powi(2.0, resolution_ram as i32)) as f32;
-
-        (resolution_correction * (vdd as f32) - (self.params_mlx.vdd25 as f32)) / (self.params_mlx.k_vdd as f32 + 3.3)
-    }
-
     fn calculate_to(&mut self, frame_data: &[u16], emissivity: f32, tr: f32, result: &mut [f32]) {
         let mut ir_data_cp = [0.0f32; 2];
         let mut alpha_corr_r = [0.0f32; 4];
@@ -261,9 +239,9 @@ impl ThermalCamera {
         tr4 *= tr4;
         let ta_tr = tr4 - (tr4 - ta4) / emissivity;
 
-        let kta_scale = f32::powf(2.0, self.params_mlx.kta_scale as f32);
-        let kv_scale = f32::powf(2.0, self.params_mlx.kv_scale as f32);
-        let alpha_scale = f32::powf(2.0, self.params_mlx.alpha_scale as f32);
+        let kta_scale = 2.0f32.powf(self.params_mlx.kta_scale as f32);
+        let kv_scale = 2.0f32.powf(self.params_mlx.kv_scale as f32);
+        let alpha_scale = 2.0f32.powf(self.params_mlx.alpha_scale as f32);
 
         alpha_corr_r[0] = 1.0 / (1.0 + self.params_mlx.ks_to[0] * 40.0);
         alpha_corr_r[1] = 1.0;
@@ -310,9 +288,9 @@ impl ThermalCamera {
             alpha_compensated *= 1.0 + self.params_mlx.ks_ta * (ta - 25.0);
 
             let mut sx = alpha_compensated.powi(3) * (ir_data + alpha_compensated * ta_tr);
-            sx = f32::sqrt(f32::sqrt(sx)) * self.params_mlx.ks_to[1];
+            sx = sx.sqrt().sqrt() * self.params_mlx.ks_to[1];
 
-            let mut to = f32::sqrt(f32::sqrt(ir_data / (alpha_compensated * (1.0 - self.params_mlx.ks_to[1] * 273.15) + sx) + ta_tr)) - 273.15;
+            let mut to = (ir_data / (alpha_compensated * (1.0 - self.params_mlx.ks_to[1] * 273.15) + sx) + ta_tr).sqrt().sqrt() - 273.15;
 
             let range = if to < self.params_mlx.ct[1] as f32 {
                 0
@@ -324,12 +302,34 @@ impl ThermalCamera {
                 3
             };
 
-            to = f32::sqrt(f32::sqrt(ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - (self.params_mlx.ct[range] as f32))) + ta_tr)) - 273.15);
+            to = ((ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - (self.params_mlx.ct[range] as f32))) + ta_tr)).sqrt() - 273.15).sqrt();
 
             result[pixel_number] = to;
         }
     }
 
+    fn get_ta(&self, frame_data: &[u16]) -> f32 {
+        let vdd = self.get_vdd(frame_data);
+        let ptat = frame_data[800] as i16;
+
+        let ptat_art = (ptat as f32) / ((ptat as f32 * self.params_mlx.alpha_ptat) + (frame_data[768] as i16 as f32)) * 2f32.powf(18.0);
+
+        let mut ta = ptat_art / (1.0 + self.params_mlx.kv_ptat * (vdd - 3.3)) - (self.params_mlx.vp_tat25 as f32);
+        ta /= self.params_mlx.kt_ptat;
+        ta += 25.0;
+
+        ta
+    }
+    
+    fn get_vdd(&self, frame_data: &[u16]) -> f32 {
+        let vdd = frame_data[810] as i16;
+
+        let resolution_ram = ((frame_data[832] & 0x0C00) >> 10) as u32;
+        let resolution_correction = ((2i32.pow(self.params_mlx.resolution_ee as u32)) / 2i32.pow(resolution_ram)) as f32;
+
+        (resolution_correction * (vdd as f32) - (self.params_mlx.vdd25 as f32)) / (self.params_mlx.k_vdd as f32 + 3.3)
+    }
+    
     fn read_words_from_register(&mut self, register: u16, words: &mut [u16])
     {
         let mut words_buffer = vec![0; &words.len() * 2]; // Create a dynamically sized buffer
@@ -392,7 +392,8 @@ impl ThermalCamera {
     }
 }
 
-struct ParamsMlx {
+#[derive(Debug)]
+pub struct ParamsMlx {
     pub k_vdd: i16,
     pub vdd25: i16,
     pub kv_ptat: f32,
@@ -461,7 +462,7 @@ impl ParamsMlx {
     fn extract_tgc_parameters(&mut self, ee_data: &[u16]) {
         // what a hell was this
         // self.tgc = (ee_data[60] as i8 & 0x00FF) as f32 / 32.0;
-        self.tgc = (ee_data[60] as u8 & 0xFF) as f32 / 32.0;
+        self.tgc = (ee_data[60] as i8 & 0xFFu8 as i8) as f32 / 32.0;
     }
 
     fn extract_resolution_parameters(&mut self, ee_data: &[u16]) {
@@ -473,15 +474,15 @@ impl ParamsMlx {
     }
 
     fn extract_ks_to_parameters(&mut self, ee_data: &[u16]) {
-        let step: u16 = ((ee_data[63] & 0x3000) >> 12) * 10;
+        let step: i16 = (((ee_data[63] & 0x3000) >> 12) * 10) as i16;
     
         self.ct[0] = -40;
         self.ct[1] = 0;
         self.ct[2] = ((ee_data[63] & 0x00F0) >> 4) as i16;
         self.ct[3] = ((ee_data[63] & 0x0F00) >> 8) as i16;
     
-        self.ct[2] *= step as i16;
-        self.ct[3] = self.ct[2] + self.ct[3] * step as i16;
+        self.ct[2] *= step;
+        self.ct[3] = self.ct[2] + self.ct[3] * step;
         self.ct[4] = 400;
     
         let ks_to_scale = 1 << ((ee_data[63] & 0x000F) + 8);
@@ -568,6 +569,8 @@ impl ParamsMlx {
             temp = alpha_temp[i] * f32::powf(2.0, alpha_scale as f32);
             self.alpha[i] = (temp + 0.5) as u16;
         }
+        
+        self.alpha_scale = alpha_scale;
     }
 
     fn extract_offset_parameters(&mut self, ee_data: &[u16]) {
@@ -659,9 +662,8 @@ impl ParamsMlx {
         }
 
         kta_scale1 = 0;
-        let mut scale_temp = temp;
-        while scale_temp < 63.4 {
-            scale_temp *= 2.0;
+        while temp < 63.4 {
+            temp *= 2.0;
             kta_scale1 += 1;
         }
 
@@ -725,18 +727,17 @@ impl ParamsMlx {
         }
 
         kv_scale = 0;
-        let mut scale_temp = temp;
-        while scale_temp < 63.4 {
-            scale_temp *= 2.0;
+        while temp < 63.4 {
+            temp *= 2.0;
             kv_scale += 1;
         }
 
         for i in 0..TOT_PIXELS {
-            let val = kv_temp[i] * 2f32.powi(kv_scale as i32);
-            self.kv[i] = if val < 0.0 {
-                (val - 0.5).floor() as i8
+            temp = kv_temp[i] * 2f32.powi(kv_scale as i32);
+            self.kv[i] = if temp < 0.0 {
+                (temp - 0.5) as i8
             } else {
-                (val + 0.5).floor() as i8
+                (temp + 0.5) as i8
             };
         }
 
@@ -775,10 +776,12 @@ impl ParamsMlx {
         alpha_sp[1] = (1.0 + alpha_sp[1] / 128.0) * alpha_sp[0];
 
         let cp_kta = (ee_data[59] & 0x00FF) as i8;
-        let kta_scale1 = ((ee_data[56] & 0x00F0) >> 4) + 8;
-        self.cp_kta = cp_kta as f32 / 2f32.powi(kta_scale1 as i32);
+        
+        let kta_scale1: i32 = (((ee_data[56] & 0x00F0) >> 4) + 8) as i32;
+        self.cp_kta = cp_kta as f32 / 2f32.powi(kta_scale1);
 
         let cp_kv = ((ee_data[59] & 0xFF00) >> 8) as i8;
+        
         let kv_scale = ((ee_data[56] & 0x0F00) >> 8) as i32;
         self.cp_kv = cp_kv as f32 / 2f32.powi(kv_scale);
 
@@ -813,7 +816,9 @@ impl ParamsMlx {
         il_chess_c[2] /= 8.0;
 
         self.calibration_mode_ee = calibration_mode_ee;
-        self.il_chess_c.copy_from_slice(&il_chess_c);
+        self.il_chess_c[0] = il_chess_c[0];
+        self.il_chess_c[1] = il_chess_c[0];
+        self.il_chess_c[2] = il_chess_c[0];
     }
 
     fn extract_deviating_pixels(&mut self, ee_data: &[u16]) -> i32 {

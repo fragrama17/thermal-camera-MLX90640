@@ -67,7 +67,7 @@ public sealed class ThermalCamera : IDisposable
         ExtractCilcParameters(eepromData);
         ExtractDeviatingPixels(eepromData);
 
-        // Console.WriteLine(_mlx.ToString());
+        Console.WriteLine(_mlx.ToString());
     }
     
     /// <returns>the current 24x32 thermal matrix</returns>
@@ -705,7 +705,7 @@ public sealed class ThermalCamera : IDisposable
         }
 
         // there's something wrong when extracting AlphaScale using Mlx method 
-        // _mlx.AlphaScale = alphaScale;
+        //_mlx.AlphaScale = alphaScale;
     }
 
     private void ExtractOffsetParameters(ushort[] eeData)
@@ -975,7 +975,7 @@ public sealed class ThermalCamera : IDisposable
         byte calibrationModeEe = (byte)((eeData[10] & 0x0800) >> 4);
         calibrationModeEe = (byte)(calibrationModeEe ^ 0x80);
 
-        ilChessC[0] = (eeData[53] & 0x003F);
+        ilChessC[0] = eeData[53] & 0x003F;
         if (ilChessC[0] > 31)
         {
             ilChessC[0] -= 64;
