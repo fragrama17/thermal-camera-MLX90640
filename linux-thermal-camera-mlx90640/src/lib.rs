@@ -1,4 +1,4 @@
-use std::{f64, io};
+use std::{io};
 use std::io::Error;
 use std::thread::sleep;
 use std::time::Duration;
@@ -246,45 +246,47 @@ impl ThermalCamera {
         alpha_corr_r[0] = 1.0 / (1.0 + self.params_mlx.ks_to[0] * 40.0);
         alpha_corr_r[1] = 1.0;
         alpha_corr_r[2] = 1.0 + self.params_mlx.ks_to[1] * (self.params_mlx.ct[2] as f32);
-        alpha_corr_r[3] = alpha_corr_r[2] * (1.0 + self.params_mlx.ks_to[2] * ((self.params_mlx.ct[3] - self.params_mlx.ct[2]) as f32));
+        alpha_corr_r[3] = alpha_corr_r[2] * (1.0 + self.params_mlx.ks_to[2] * (self.params_mlx.ct[3] - self.params_mlx.ct[2]) as f32);
 
         let gain = ((self.params_mlx.gain_ee) / frame_data[778] as i16) as f32;
 
-        let mode = (frame_data[832] & 0x1000) >> 5;
+        let mode = ((frame_data[832] & 0x1000) >> 5) as u8;
 
-        ir_data_cp[0] = frame_data[776] as f32 * gain;
-        ir_data_cp[1] = frame_data[808] as f32 * gain;
+        ir_data_cp[0] = frame_data[776] as i16 as f32 * gain;
+        ir_data_cp[1] = frame_data[808] as i16 as f32 * gain;
 
         ir_data_cp[0] -= (self.params_mlx.cp_offset[0] as f32) * (1.0 + self.params_mlx.cp_kta * (ta - 25.0)) * (1.0 + self.params_mlx.cp_kv * (vdd - 3.3));
-        if mode == self.params_mlx.calibration_mode_ee as u16 {
+        if mode == self.params_mlx.calibration_mode_ee {
             ir_data_cp[1] -= (self.params_mlx.cp_offset[1] as f32) * (1.0 + self.params_mlx.cp_kta * (ta - 25.0)) * (1.0 + self.params_mlx.cp_kv * (vdd - 3.3));
         } else {
             ir_data_cp[1] -= ((self.params_mlx.cp_offset[1] as f32) + self.params_mlx.il_chess_c[0]) * (1.0 + self.params_mlx.cp_kta * (ta - 25.0)) * (1.0 + self.params_mlx.cp_kv * (vdd - 3.3));
         }
 
         for pixel_number in 0..TOT_PIXELS {
-            let il_pattern = (pixel_number / 32 - pixel_number / 64 * 2) as f32;
-            let chess_pattern = il_pattern.powf((pixel_number - pixel_number / 2 * 2) as f32);
-            let conversion_pattern = ((pixel_number + 2) / 4 - (pixel_number + 3) / 4 + (pixel_number + 1) / 4 - pixel_number / 4) as f32 * (1.0 - 2.0 * il_pattern);
+            let il_pattern = (pixel_number / 32 - pixel_number / 64 * 2) as i8;
+            let chess_pattern = il_pattern.pow((pixel_number - pixel_number / 2 * 2) as u32);
+            let conversion_pattern = (
+                ((pixel_number + 2) / 4 - (pixel_number + 3) / 4 + (pixel_number + 1) / 4 - pixel_number / 4) as f32 * (1.0 - 2.0 * il_pattern as f32)
+            ) as i8;
 
             let pattern = if mode == 0 { il_pattern } else { chess_pattern };
 
-            if pattern != frame_data[833] as f32 { continue; }
+            if pattern != frame_data[833] as i8 { continue; }
 
-            let mut ir_data = frame_data[pixel_number] as f32 * gain;
+            let mut ir_data = frame_data[pixel_number] as i16 as f32 * gain;
 
             let kta = (self.params_mlx.kta[pixel_number] as f32) / kta_scale;
             let kv = (self.params_mlx.kv[pixel_number] as f32) / kv_scale;
             ir_data -= (self.params_mlx.offset[pixel_number] as f32) * (1.0 + kta * (ta - 25.0)) * (1.0 + kv * (vdd - 3.3));
 
-            if mode != self.params_mlx.calibration_mode_ee as u16 {
-                ir_data += self.params_mlx.il_chess_c[2] * (2.0 * il_pattern - 1.0) - self.params_mlx.il_chess_c[1] * conversion_pattern;
+            if mode != self.params_mlx.calibration_mode_ee {
+                ir_data += self.params_mlx.il_chess_c[2] * (2.0 * (il_pattern as f32) - 1.0) - self.params_mlx.il_chess_c[1] * (conversion_pattern as f32);
             }
 
             ir_data -= self.params_mlx.tgc * ir_data_cp[sub_page as usize];
             ir_data /= emissivity;
 
-            let mut alpha_compensated = (self.params_mlx.alpha_scale as f32) * alpha_scale / self.params_mlx.alpha[pixel_number] as f32;
+            let mut alpha_compensated = SCALE_ALPHA * alpha_scale / self.params_mlx.alpha[pixel_number] as f32;
             alpha_compensated *= 1.0 + self.params_mlx.ks_ta * (ta - 25.0);
 
             let mut sx = alpha_compensated.powi(3) * (ir_data + alpha_compensated * ta_tr);
@@ -302,8 +304,19 @@ impl ThermalCamera {
                 3
             };
 
-            to = ((ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - (self.params_mlx.ct[range] as f32))) + ta_tr)).sqrt() - 273.15).sqrt();
+            if pixel_number == 0 {
+                println!("ir-data: {}", ir_data);
+                println!("alpha-compensated: {}", alpha_compensated);
+                println!("alpha-corr: {}", alpha_corr_r[range]);
+                println!("ta_tr: {}", ta_tr);
+                println!("temp to: {}", to);
+            }
 
+            to = ((ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - self.params_mlx.ct[range] as f32))) + ta_tr).sqrt() - 273.15).sqrt();
+
+            if pixel_number == 0 {
+                println!("final to: {}", to);
+            }
             result[pixel_number] = to;
         }
     }
@@ -312,7 +325,9 @@ impl ThermalCamera {
         let vdd = self.get_vdd(frame_data);
         let ptat = frame_data[800] as i16;
 
-        let ptat_art = (ptat as f32) / ((ptat as f32 * self.params_mlx.alpha_ptat) + (frame_data[768] as i16 as f32)) * 2f32.powf(18.0);
+        let ptat_art = (
+            (ptat as f32) / ((ptat as f32 * self.params_mlx.alpha_ptat) + (frame_data[768] as i16 as f32)) * 2f32.powf(18.0)
+        ) as i16 as f32;
 
         let mut ta = ptat_art / (1.0 + self.params_mlx.kv_ptat * (vdd - 3.3)) - (self.params_mlx.vp_tat25 as f32);
         ta /= self.params_mlx.kt_ptat;
@@ -324,8 +339,8 @@ impl ThermalCamera {
     fn get_vdd(&self, frame_data: &[u16]) -> f32 {
         let vdd = frame_data[810] as i16;
 
-        let resolution_ram = ((frame_data[832] & 0x0C00) >> 10) as u32;
-        let resolution_correction = ((2i32.pow(self.params_mlx.resolution_ee as u32)) / 2i32.pow(resolution_ram)) as f32;
+        let resolution_ram = ((frame_data[832] & 0x0C00) >> 10) as i32;
+        let resolution_correction = ((2i32.pow(self.params_mlx.resolution_ee as u32)) / 2i32.pow(resolution_ram as u32)) as f32;
 
         (resolution_correction * (vdd as f32) - (self.params_mlx.vdd25 as f32)) / (self.params_mlx.k_vdd as f32 + 3.3)
     }

@@ -115,7 +115,7 @@ public sealed class ThermalCamera : IDisposable
             // Console.WriteLine($"it took {subPageWatch.ElapsedMilliseconds}ms to fetch sub-page {i}");
 
             var tr = GetTa(frameData) - 8;
-            // Console.WriteLine($"Tr: {tr}, for calculating pixel To");
+            Console.WriteLine($"Tr calculated: {tr}");
 
             // var toWatch = Stopwatch.StartNew();
             CalculateTo(frameData, emissivity, tr, frame);
@@ -391,12 +391,24 @@ public sealed class ThermalCamera : IDisposable
             {
                 range = 3;
             }
+            
+            if (pixelNumber == 0) {
+                Console.WriteLine($"ir-data: {irData}");
+                Console.WriteLine($"alpha-compensated: {alphaCompensated}");
+                Console.WriteLine($"alpha-corr: {alphaCorrR[range]}");
+                Console.WriteLine($"ta_tr: {taTr}");
+                Console.WriteLine($"temp to: {to}");
+            }
 
             to = (float)(Math.Sqrt(Math.Sqrt(irData /
                              (alphaCompensated * alphaCorrR[range] *
                               (1 + _mlx.KsTo[range] * (to - _mlx.Ct[range]))) + taTr))
                          - 273.15);
 
+            if (pixelNumber == 0) {
+                Console.WriteLine($"final to: {to}");
+            }            
+            
             result[pixelNumber] = to;
         }
     }

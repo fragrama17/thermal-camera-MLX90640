@@ -25,3 +25,12 @@ cp_offset: [-61, -56],
 il_chess_c: [0.4375, 3.5, 0.125],
 broken_pixels: [65535, 65535, 65535, 65535, 65535],
 outlier_pixels: [65535, 65535, 65535, 65535, 65535]
+
+// to
+Tr calculated: 26.117027
+ir-data: -48.85617
+alpha-compensated: 4.106844E-08
+alpha-corr: 1
+ta_tr: 8.960803E+09
+temp to: 23.704023
+final to: 23.704147
