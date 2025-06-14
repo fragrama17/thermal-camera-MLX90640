@@ -2,9 +2,7 @@ use std::time::Instant;
 use linux_thermal_camera_mlx90640::ThermalCamera;
 
 fn main() {
-    let mut camera = ThermalCamera::new(0x33, 1);
-
-    camera.init_parameters();
+    let mut camera = ThermalCamera::default();
 
     loop {
         let start = Instant::now();

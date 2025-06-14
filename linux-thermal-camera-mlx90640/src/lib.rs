@@ -89,33 +89,15 @@ const FRAME_DATA_ERROR: i32 = -8;
 
 impl ThermalCamera {
     pub fn new(address: u16, bus_id: i32) -> Self {
+        let mut device = LinuxI2CDevice::new(format!("/dev/i2c-{}", bus_id), address).unwrap();
+        let mut params_mlx = ParamsMlx::default();
+        params_mlx.init_parameters(&mut device, address);
+        
         Self {
             address,
-            device: LinuxI2CDevice::new(format!("/dev/i2c-{}", bus_id), address).unwrap(),
-            params_mlx: ParamsMlx::default()
+            device,
+            params_mlx
         }
-    }
-
-    pub fn init_parameters(&mut self) {
-        let mut eeprom_data = [0u16; 832];
-        self.read_words_from_register(EE_PROM_START_ADDRESS, &mut eeprom_data);
-        self.params_mlx.extract_vdd_parameters(&eeprom_data);
-        self.params_mlx.extract_ptat_parameters(&eeprom_data);
-        self.params_mlx.extract_gain_parameters(&eeprom_data);
-        self.params_mlx.extract_tgc_parameters(&eeprom_data);
-        self.params_mlx.extract_resolution_parameters(&eeprom_data);
-        self.params_mlx.extract_ks_ta_parameters(&eeprom_data);
-        self.params_mlx.extract_ks_to_parameters(&eeprom_data);
-        self.params_mlx.extract_alpha_parameters(&eeprom_data);
-        self.params_mlx.extract_offset_parameters(&eeprom_data);
-        self.params_mlx.extract_kta_pixel_parameters(&eeprom_data);
-        self.params_mlx.extract_kv_pixel_parameters(&eeprom_data);
-        self.params_mlx.extract_cp_parameters(&eeprom_data);
-        self.params_mlx.extract_cilc_parameters(&eeprom_data);
-        self.params_mlx.extract_deviating_pixels(&eeprom_data);
-        self.params_mlx.alpha_scale = 10u8;
-        self.params_mlx.il_chess_c[1] = 3.5;
-        self.params_mlx.il_chess_c[2] = 0.125;
     }
 
     pub fn get_image(&mut self) -> Result<[f32; TOT_PIXELS], Error> {
@@ -154,7 +136,7 @@ impl ThermalCamera {
 
         while data_ready == 0
         {
-            status_word = self.read_word_from_register(STATUS_REGISTER);
+            status_word = read_word_from_register(&mut self.device, self.address, STATUS_REGISTER);
 
             data_ready = (status_word >> 3) & 0b1;
         }
@@ -166,14 +148,14 @@ impl ThermalCamera {
                 return status;
             }
 
-            self.read_words_from_register(RAM_START_REGISTER, frame_data);
+            read_words_from_register(&mut self.device, self.address,RAM_START_REGISTER, frame_data);
 
-            status_word = self.read_word_from_register(STATUS_REGISTER);
+            status_word = read_word_from_register(&mut self.device, self.address,STATUS_REGISTER);
 
             data_ready = (status_word >> 3) & 0b1;
         }
 
-        let control_word = self.read_word_from_register(CONTROL_REGISTER);
+        let control_word = read_word_from_register(&mut self.device, self.address,CONTROL_REGISTER);
 
         frame_data[832] = control_word;
         frame_data[833] = status_word & 0x0001;
@@ -195,17 +177,17 @@ impl ThermalCamera {
     }
 
     pub fn get_refresh_rate(&mut self) -> RefreshRate {
-        let word = self.read_word_from_register(CONTROL_REGISTER);
+        let word = read_word_from_register(&mut self.device, self.address, CONTROL_REGISTER);
 
         RefreshRate::try_from((word >> 7 & 0b111) as u8).unwrap()
     }
 
     pub fn set_refresh_rate(&mut self, refresh_rate: RefreshRate) {
-        let control_word = self.read_word_from_register(CONTROL_REGISTER);
+        let control_word = read_word_from_register(&mut self.device, self.address, CONTROL_REGISTER);
         let new_refresh_rate = (refresh_rate as u16) << 7;
         let new_control_word = new_refresh_rate | (control_word & 0xFC7F);  // 0b1111110001111111, the 3 bit set to 0 to merge | with new refresh-rate
 
-        self.write_word_to_register(CONTROL_REGISTER, new_control_word);
+        write_word_to_register(&mut self.device, CONTROL_REGISTER, new_control_word);
     }
 
     fn validate_frame_data(frame_data: &[u16; 834]) -> i32 {
@@ -339,21 +321,10 @@ impl ThermalCamera {
     fn get_vdd(&self, frame_data: &[u16]) -> f32 {
         let vdd = frame_data[810] as i16;
 
-        let resolution_ram = ((frame_data[832] & 0x0C00) >> 10) as i32;
+        let resolution_ram = (frame_data[832] & 0x0C00) >> 10;
         let resolution_correction = ((2i32.pow(self.params_mlx.resolution_ee as u32)) / 2i32.pow(resolution_ram as u32)) as f32;
 
         (resolution_correction * (vdd as f32) - (self.params_mlx.vdd25 as f32)) / (self.params_mlx.k_vdd as f32 + 3.3)
-    }
-    
-    fn read_words_from_register(&mut self, register: u16, words: &mut [u16])
-    {
-        let mut words_buffer = vec![0; &words.len() * 2]; // Create a dynamically sized buffer
-
-        self.read_from_register(register, &mut words_buffer);
-
-        for i in (0..words_buffer.len()).step_by(2) {
-            words[i / 2] = ((words_buffer[i] as u16) << 8) | (words_buffer[i + 1] as u16); // MSB at index 0, LSB at index 1
-        }
     }
 
     fn write_init_value_to_status_register(&mut self) -> i32 {
@@ -363,47 +334,31 @@ impl ThermalCamera {
 
         // TODO test if transfer method can fix slow frame-rate limit
 
-        self.write_word_to_register(STATUS_REGISTER, init_word);
+        write_word_to_register(&mut self.device, STATUS_REGISTER, init_word);
 
         sleep(Duration::from_millis(1));
 
-        let data_check = self.read_word_from_register(STATUS_REGISTER);
+        let data_check = read_word_from_register(&mut self.device, self.address, STATUS_REGISTER);
         if data_check == sub_page0check || data_check == sub_page1check {
             return data_check as i32;
         }
 
         return -2;
     }
+}
 
-    fn write_word_to_register(&mut self, register: u16, word: u16) {
-        let mut cmd: [u8; 4] = [0; 4];
-
-        cmd[0] = (register >> 8) as u8;
-        cmd[1] = (register & 0xFF) as u8;
-        cmd[2] = (word >> 8) as u8;
-        cmd[3] = (word & 0xFF) as u8;
-
-        let _ = self.device.write(&mut cmd);
-    }
-
-    fn read_word_from_register(&mut self, register: u16) -> u16 {
-        let mut word_buffer: [u8; 2] = [0; 2];
-
-        self.read_from_register(register, &mut word_buffer);
-
-        ((word_buffer[0] as u16) << 8) | (word_buffer[1] as u16)    // MSB at index 0, LSB at index 1
-    }
-
-    fn read_from_register(&mut self, register: u16, mut read_buffer: &mut [u8]) {
-        let mut register_buffer: [u8; 2] = [0; 2];
-
-        register_buffer[0] = (register >> 8) as u8;
-        register_buffer[1] = (register & 0xFF) as u8;
-
-        let _ = self.device.transfer(&mut [
-            LinuxI2CMessage::write(&mut register_buffer).with_address(self.address),
-            LinuxI2CMessage::read(&mut read_buffer).with_address(self.address),
-        ]);
+impl Default for ThermalCamera {
+    fn default() -> Self {
+        let address = 0x33;
+        let mut device = LinuxI2CDevice::new(format!("/dev/i2c-{}", 1), address).unwrap();
+        let mut params_mlx = ParamsMlx::default();
+        params_mlx.init_parameters(&mut device, address);
+        
+        Self {
+            address,
+            device,
+            params_mlx
+        }
     }
 }
 
@@ -439,6 +394,29 @@ pub struct ParamsMlx {
 }
 
 impl ParamsMlx {
+
+    pub fn init_parameters(&mut self, device: &mut LinuxI2CDevice, address: u16) {
+        let mut eeprom_data = [0u16; 832];
+        read_words_from_register(device, address, EE_PROM_START_ADDRESS, &mut eeprom_data);
+        self.extract_vdd_parameters(&eeprom_data);
+        self.extract_ptat_parameters(&eeprom_data);
+        self.extract_gain_parameters(&eeprom_data);
+        self.extract_tgc_parameters(&eeprom_data);
+        self.extract_resolution_parameters(&eeprom_data);
+        self.extract_ks_ta_parameters(&eeprom_data);
+        self.extract_ks_to_parameters(&eeprom_data);
+        self.extract_alpha_parameters(&eeprom_data);
+        self.extract_offset_parameters(&eeprom_data);
+        self.extract_kta_pixel_parameters(&eeprom_data);
+        self.extract_kv_pixel_parameters(&eeprom_data);
+        self.extract_cp_parameters(&eeprom_data);
+        self.extract_cilc_parameters(&eeprom_data);
+        self.extract_deviating_pixels(&eeprom_data);
+        self.alpha_scale = 10u8;
+        self.il_chess_c[1] = 3.5;
+        self.il_chess_c[2] = 0.125;
+    }
+
     fn extract_vdd_parameters(&mut self, eeprom_data: &[u16]) {
         let k_vdd = ((eeprom_data[51] & 0xFF00) >> 8) as i8;
         let mut vdd25 = (eeprom_data[51] & 0x00FF) as i16;
@@ -951,5 +929,49 @@ impl Default for ParamsMlx {
             broken_pixels: [0; 5],
             outlier_pixels: [0; 5],
         }
+    }
+}
+
+// TODO move these functions below to i2c-utils.rs
+
+fn write_word_to_register(device: &mut LinuxI2CDevice, register: u16, word: u16) {
+    let mut cmd: [u8; 4] = [0; 4];
+
+    cmd[0] = (register >> 8) as u8;
+    cmd[1] = (register & 0xFF) as u8;
+    cmd[2] = (word >> 8) as u8;
+    cmd[3] = (word & 0xFF) as u8;
+
+    let _ = device.write(&mut cmd);
+}
+
+fn read_word_from_register(device: &mut LinuxI2CDevice, address: u16, register: u16) -> u16 {
+    let mut word_buffer: [u8; 2] = [0; 2];
+
+    read_from_register(device, address, register, &mut word_buffer);
+
+    ((word_buffer[0] as u16) << 8) | (word_buffer[1] as u16)    // MSB at index 0, LSB at index 1
+}
+
+fn read_from_register(device: &mut LinuxI2CDevice, address: u16, register: u16, mut read_buffer: &mut [u8]) {
+    let mut register_buffer: [u8; 2] = [0; 2];
+
+    register_buffer[0] = (register >> 8) as u8;
+    register_buffer[1] = (register & 0xFF) as u8;
+
+    let _ = device.transfer(&mut [
+        LinuxI2CMessage::write(&mut register_buffer).with_address(address),
+        LinuxI2CMessage::read(&mut read_buffer).with_address(address),
+    ]);
+}
+
+fn read_words_from_register(device: &mut LinuxI2CDevice, address: u16, register: u16, words: &mut [u16])
+{
+    let mut words_buffer = vec![0; &words.len() * 2]; // Create a dynamically sized buffer
+
+    read_from_register(device, address, register, &mut words_buffer);
+
+    for i in (0..words_buffer.len()).step_by(2) {
+        words[i / 2] = ((words_buffer[i] as u16) << 8) | (words_buffer[i + 1] as u16); // MSB at index 0, LSB at index 1
     }
 }

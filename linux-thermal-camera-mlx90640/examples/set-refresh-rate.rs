@@ -2,8 +2,7 @@
 use linux_thermal_camera_mlx90640::{RefreshRate, ThermalCamera};
 
 fn main() {
-    println!("and here we go, doing awesome things in rust ! ;D");
-    let mut thermal_camera = ThermalCamera::new(0x33, 1);
+    let mut thermal_camera = ThermalCamera::default();
 
     println!("i2c bus initialised successfully");
 
