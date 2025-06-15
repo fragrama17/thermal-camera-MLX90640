@@ -1,14 +1,18 @@
-use std::{io};
+use std::io;
 use std::io::Error;
 use std::thread::sleep;
 use std::time::Duration;
-use i2cdev::core::{I2CDevice, I2CTransfer};
-use i2cdev::linux::{I2CMessage, LinuxI2CDevice, LinuxI2CMessage};
+
+use i2cdev::linux::LinuxI2CDevice;
+
+use crate::i2c_utils::{read_word_from_register, read_words_from_register, write_word_to_register};
+
+mod i2c_utils;
 
 pub struct ThermalCamera {
     address: u16,
     device: LinuxI2CDevice,
-    pub params_mlx: ParamsMlx
+    pub params_mlx: ParamsMlx,
 }
 
 /**
@@ -92,11 +96,11 @@ impl ThermalCamera {
         let mut device = LinuxI2CDevice::new(format!("/dev/i2c-{}", bus_id), address).unwrap();
         let mut params_mlx = ParamsMlx::default();
         params_mlx.init_parameters(&mut device, address);
-        
+
         Self {
             address,
             device,
-            params_mlx
+            params_mlx,
         }
     }
 
@@ -148,14 +152,14 @@ impl ThermalCamera {
                 return status;
             }
 
-            read_words_from_register(&mut self.device, self.address,RAM_START_REGISTER, frame_data);
+            read_words_from_register(&mut self.device, self.address, RAM_START_REGISTER, frame_data);
 
-            status_word = read_word_from_register(&mut self.device, self.address,STATUS_REGISTER);
+            status_word = read_word_from_register(&mut self.device, self.address, STATUS_REGISTER);
 
             data_ready = (status_word >> 3) & 0b1;
         }
 
-        let control_word = read_word_from_register(&mut self.device, self.address,CONTROL_REGISTER);
+        let control_word = read_word_from_register(&mut self.device, self.address, CONTROL_REGISTER);
 
         frame_data[832] = control_word;
         frame_data[833] = status_word & 0x0001;
@@ -317,7 +321,7 @@ impl ThermalCamera {
 
         ta
     }
-    
+
     fn get_vdd(&self, frame_data: &[u16]) -> f32 {
         let vdd = frame_data[810] as i16;
 
@@ -353,11 +357,11 @@ impl Default for ThermalCamera {
         let mut device = LinuxI2CDevice::new(format!("/dev/i2c-{}", 1), address).unwrap();
         let mut params_mlx = ParamsMlx::default();
         params_mlx.init_parameters(&mut device, address);
-        
+
         Self {
             address,
             device,
-            params_mlx
+            params_mlx,
         }
     }
 }
@@ -394,7 +398,6 @@ pub struct ParamsMlx {
 }
 
 impl ParamsMlx {
-
     pub fn init_parameters(&mut self, device: &mut LinuxI2CDevice, address: u16) {
         let mut eeprom_data = [0u16; 832];
         read_words_from_register(device, address, EE_PROM_START_ADDRESS, &mut eeprom_data);
@@ -468,30 +471,30 @@ impl ParamsMlx {
 
     fn extract_ks_to_parameters(&mut self, ee_data: &[u16]) {
         let step: i16 = (((ee_data[63] & 0x3000) >> 12) * 10) as i16;
-    
+
         self.ct[0] = -40;
         self.ct[1] = 0;
         self.ct[2] = ((ee_data[63] & 0x00F0) >> 4) as i16;
         self.ct[3] = ((ee_data[63] & 0x0F00) >> 8) as i16;
-    
+
         self.ct[2] *= step;
         self.ct[3] = self.ct[2] + self.ct[3] * step;
         self.ct[4] = 400;
-    
+
         let ks_to_scale = 1 << ((ee_data[63] & 0x000F) + 8);
-    
+
         self.ks_to[0] = (ee_data[61] & 0x00FF) as i8 as f32 / ks_to_scale as f32;
         self.ks_to[1] = ((ee_data[61] >> 8) & 0x00FF) as i8 as f32 / ks_to_scale as f32;
         self.ks_to[2] = (ee_data[62] & 0x00FF) as i8 as f32 / ks_to_scale as f32;
         self.ks_to[3] = ((ee_data[62] >> 8) & 0x00FF) as i8 as f32 / ks_to_scale as f32;
         self.ks_to[4] = -0.0002;
-    }    
+    }
 
     fn extract_alpha_parameters(&mut self, ee_data: &[u16]) {
         let mut acc_row: [i32; 24] = [0; 24];
         let mut acc_column: [i32; 32] = [0; 32];
         let mut p: usize;
-        let mut alpha_temp: [f32; TOT_PIXELS] = [0.0; TOT_PIXELS]; 
+        let mut alpha_temp: [f32; TOT_PIXELS] = [0.0; TOT_PIXELS];
 
         let acc_rem_scale: u8 = (ee_data[32] & 0x000F) as u8;
         let acc_column_scale: u8 = ((ee_data[32] & 0x00F0) >> 4) as u8;
@@ -536,9 +539,9 @@ impl ParamsMlx {
 
                 alpha_temp[p] *= (1 << acc_rem_scale) as f32;
                 alpha_temp[p] = alpha_ref as f32 +
-                                (acc_row[i] << acc_row_scale) as f32 +
-                                (acc_column[j] << acc_column_scale) as f32 +
-                                alpha_temp[p];
+                    (acc_row[i] << acc_row_scale) as f32 +
+                    (acc_column[j] << acc_column_scale) as f32 +
+                    alpha_temp[p];
                 alpha_temp[p] /= f32::powf(2.0, 4.0);
                 alpha_temp[p] -= self.tgc * (self.cp_alpha[0] + self.cp_alpha[1]) / 2.0;
                 alpha_temp[p] = SCALE_ALPHA / alpha_temp[p];
@@ -552,7 +555,7 @@ impl ParamsMlx {
             }
         }
 
-        let mut alpha_scale: u8 = 0; 
+        let mut alpha_scale: u8 = 0;
         while temp < 32767.4 {
             temp *= 2.0;
             alpha_scale += 1;
@@ -562,7 +565,7 @@ impl ParamsMlx {
             temp = alpha_temp[i] * f32::powf(2.0, alpha_scale as f32);
             self.alpha[i] = (temp + 0.5) as u16;
         }
-        
+
         self.alpha_scale = alpha_scale;
     }
 
@@ -769,12 +772,12 @@ impl ParamsMlx {
         alpha_sp[1] = (1.0 + alpha_sp[1] / 128.0) * alpha_sp[0];
 
         let cp_kta = (ee_data[59] & 0x00FF) as i8;
-        
+
         let kta_scale1: i32 = (((ee_data[56] & 0x00F0) >> 4) + 8) as i32;
         self.cp_kta = cp_kta as f32 / 2f32.powi(kta_scale1);
 
         let cp_kv = ((ee_data[59] & 0xFF00) >> 8) as i8;
-        
+
         let kv_scale = ((ee_data[56] & 0x0F00) >> 8) as i32;
         self.cp_kv = cp_kv as f32 / 2f32.powi(kv_scale);
 
@@ -895,7 +898,6 @@ impl ParamsMlx {
 
         0
     }
-
 }
 
 impl Default for ParamsMlx {
@@ -929,49 +931,5 @@ impl Default for ParamsMlx {
             broken_pixels: [0; 5],
             outlier_pixels: [0; 5],
         }
-    }
-}
-
-// TODO move these functions below to i2c-utils.rs
-
-fn write_word_to_register(device: &mut LinuxI2CDevice, register: u16, word: u16) {
-    let mut cmd: [u8; 4] = [0; 4];
-
-    cmd[0] = (register >> 8) as u8;
-    cmd[1] = (register & 0xFF) as u8;
-    cmd[2] = (word >> 8) as u8;
-    cmd[3] = (word & 0xFF) as u8;
-
-    let _ = device.write(&mut cmd);
-}
-
-fn read_word_from_register(device: &mut LinuxI2CDevice, address: u16, register: u16) -> u16 {
-    let mut word_buffer: [u8; 2] = [0; 2];
-
-    read_from_register(device, address, register, &mut word_buffer);
-
-    ((word_buffer[0] as u16) << 8) | (word_buffer[1] as u16)    // MSB at index 0, LSB at index 1
-}
-
-fn read_from_register(device: &mut LinuxI2CDevice, address: u16, register: u16, mut read_buffer: &mut [u8]) {
-    let mut register_buffer: [u8; 2] = [0; 2];
-
-    register_buffer[0] = (register >> 8) as u8;
-    register_buffer[1] = (register & 0xFF) as u8;
-
-    let _ = device.transfer(&mut [
-        LinuxI2CMessage::write(&mut register_buffer).with_address(address),
-        LinuxI2CMessage::read(&mut read_buffer).with_address(address),
-    ]);
-}
-
-fn read_words_from_register(device: &mut LinuxI2CDevice, address: u16, register: u16, words: &mut [u16])
-{
-    let mut words_buffer = vec![0; &words.len() * 2]; // Create a dynamically sized buffer
-
-    read_from_register(device, address, register, &mut words_buffer);
-
-    for i in (0..words_buffer.len()).step_by(2) {
-        words[i / 2] = ((words_buffer[i] as u16) << 8) | (words_buffer[i + 1] as u16); // MSB at index 0, LSB at index 1
     }
 }

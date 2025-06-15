@@ -1,6 +1,8 @@
 ﻿use std::io;
 use linux_thermal_camera_mlx90640::{RefreshRate, ThermalCamera};
 
+const RANGE: &str = "[0(0.5Hz), 1(1Hz), 2(2Hz), 3(4Hz), 4(8Hz), 5(16Hz), 6(32Hz), 7(64Hz)]";
+
 fn main() {
     let mut thermal_camera = ThermalCamera::default();
 
@@ -14,7 +16,7 @@ fn main() {
     let mut new_refresh_rate = 255u8;
 
     while new_refresh_rate == 255 {
-        println!("insert desired refresh-rate to set [0, 1, 2, 3, 4, 5, 6, 7]:");
+        println!("insert desired refresh-rate to set {}:", RANGE);
         match io::stdin().read_line(&mut line) {
             Ok(_) => {
                 let num = line.trim().parse::<u8>();
@@ -33,7 +35,7 @@ fn main() {
                     Err(_) => {
                         new_refresh_rate = 255;
                         line = String::from("");
-                        println!("failed to parse refresh-rate, values allowed are [0, 1, 2, 3, 4, 5, 6, 7]")
+                        println!("failed to parse refresh-rate, values allowed are {}", RANGE)
                     }
                 }
             }
