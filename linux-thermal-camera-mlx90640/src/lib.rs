@@ -120,8 +120,6 @@ impl ThermalCamera {
 
             let tr = self.get_ta(&frame_data) - 8.0;
 
-            println!("tr calculated: {}", tr);
-
             // Calculate To for pixels
             self.calculate_to(&frame_data, emissivity, tr, &mut frame);
         }
@@ -290,19 +288,8 @@ impl ThermalCamera {
                 3
             };
 
-            if pixel_number == 0 {
-                println!("ir-data: {}", ir_data);
-                println!("alpha-compensated: {}", alpha_compensated);
-                println!("alpha-corr: {}", alpha_corr_r[range]);
-                println!("ta_tr: {}", ta_tr);
-                println!("temp to: {}", to);
-            }
+            to = (ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - self.params_mlx.ct[range] as f32))) + ta_tr).sqrt().sqrt() - 273.15;
 
-            to = ((ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - self.params_mlx.ct[range] as f32))) + ta_tr).sqrt() - 273.15).sqrt();
-
-            if pixel_number == 0 {
-                println!("final to: {}", to);
-            }
             result[pixel_number] = to;
         }
     }
@@ -325,10 +312,10 @@ impl ThermalCamera {
     fn get_vdd(&self, frame_data: &[u16]) -> f32 {
         let vdd = frame_data[810] as i16;
 
-        let resolution_ram = (frame_data[832] & 0x0C00) >> 10;
-        let resolution_correction = ((2i32.pow(self.params_mlx.resolution_ee as u32)) / 2i32.pow(resolution_ram as u32)) as f32;
+        let resolution_ram: i32 = ((frame_data[832] & 0x0C00) >> 10) as i32;
+        let resolution_correction = (2f32.powf(self.params_mlx.resolution_ee as f32)) / 2f32.powf(resolution_ram as f32);
 
-        (resolution_correction * (vdd as f32) - (self.params_mlx.vdd25 as f32)) / (self.params_mlx.k_vdd as f32 + 3.3)
+        (resolution_correction * (vdd as f32) - (self.params_mlx.vdd25 as f32)) / self.params_mlx.k_vdd as f32 + 3.3
     }
 
     fn write_init_value_to_status_register(&mut self) -> i32 {

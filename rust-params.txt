@@ -27,10 +27,12 @@ broken_pixels: [65535, 65535, 65535, 65535, 65535],
 outlier_pixels: [65535, 65535, 65535, 65535, 65535]
 
 // to
-tr calculated: 28.7873
-ir-data: -119.20298
-alpha-compensated: 0.000000040794607
+tr calculated: 23.77534
+vdd: 3.114236
+ta: 31.77534
+ir-data: -23.478746
+alpha-compensated: 0.00000004130857
 alpha-corr: 1
-ta_tr: 9275976000
-temp to: 9.123291
-final to: 281.7894
+ta_tr: 8691082000
+temp to: 27.031708
+final to: 299.7264

@@ -1,5 +1,4 @@
 ﻿using System.Device.I2c;
-using System.Diagnostics;
 using System.Text;
 
 namespace ThermalCameraMlx90640;
@@ -115,7 +114,6 @@ public sealed class ThermalCamera : IDisposable
             // Console.WriteLine($"it took {subPageWatch.ElapsedMilliseconds}ms to fetch sub-page {i}");
 
             var tr = GetTa(frameData) - 8;
-            Console.WriteLine($"Tr calculated: {tr}");
 
             // var toWatch = Stopwatch.StartNew();
             CalculateTo(frameData, emissivity, tr, frame);
@@ -294,9 +292,6 @@ public sealed class ThermalCamera : IDisposable
         float vdd = GetVdd(frameData);
         float ta = GetTa(frameData);
 
-        // Console.WriteLine($"Vdd: {vdd}, for calculating pixel To");
-        // Console.WriteLine($"Ta: {ta}, for calculating pixel To");
-
         float ta4 = ta + 273.15F;
         ta4 *= ta4;
         ta4 *= ta4;
@@ -391,24 +386,12 @@ public sealed class ThermalCamera : IDisposable
             {
                 range = 3;
             }
-            
-            if (pixelNumber == 0) {
-                Console.WriteLine($"ir-data: {irData}");
-                Console.WriteLine($"alpha-compensated: {alphaCompensated}");
-                Console.WriteLine($"alpha-corr: {alphaCorrR[range]}");
-                Console.WriteLine($"ta_tr: {taTr}");
-                Console.WriteLine($"temp to: {to}");
-            }
 
             to = (float)(Math.Sqrt(Math.Sqrt(irData /
                              (alphaCompensated * alphaCorrR[range] *
                               (1 + _mlx.KsTo[range] * (to - _mlx.Ct[range]))) + taTr))
                          - 273.15);
 
-            if (pixelNumber == 0) {
-                Console.WriteLine($"final to: {to}");
-            }            
-            
             result[pixelNumber] = to;
         }
     }
