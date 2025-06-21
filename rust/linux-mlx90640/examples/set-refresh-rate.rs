@@ -1,5 +1,5 @@
 ﻿use std::io;
-use linux_thermal_camera_mlx90640::{RefreshRate, ThermalCamera};
+use linux_mlx90640::{RefreshRate, ThermalCamera};
 
 const RANGE: &str = "[0(0.5Hz), 1(1Hz), 2(2Hz), 3(4Hz), 4(8Hz), 5(16Hz), 6(32Hz), 7(64Hz)]";
 

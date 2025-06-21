@@ -1,5 +1,5 @@
 use std::time::Instant;
-use linux_thermal_camera_mlx90640::ThermalCamera;
+use linux_mlx90640::ThermalCamera;
 
 fn main() {
     let mut camera = ThermalCamera::default();

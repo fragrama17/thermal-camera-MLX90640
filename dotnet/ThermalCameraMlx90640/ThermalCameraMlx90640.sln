@@ -4,6 +4,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThermalCameraMlx90640", "Th
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleDemo", "SimpleDemo\SimpleDemo.csproj", "{6ED54516-4BF8-481A-9237-3455074DD155}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThermalCameraStream", "ThermalCameraStream\ThermalCameraStream.csproj", "{B854B88A-6511-4D0E-8DAE-B835258EC6D2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +20,9 @@ Global
 		{6ED54516-4BF8-481A-9237-3455074DD155}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6ED54516-4BF8-481A-9237-3455074DD155}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6ED54516-4BF8-481A-9237-3455074DD155}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B854B88A-6511-4D0E-8DAE-B835258EC6D2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B854B88A-6511-4D0E-8DAE-B835258EC6D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B854B88A-6511-4D0E-8DAE-B835258EC6D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B854B88A-6511-4D0E-8DAE-B835258EC6D2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

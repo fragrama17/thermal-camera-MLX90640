@@ -1,5 +1,5 @@
 [package]
-name = "linux-thermal-camera-mlx90640"
+name = "linux-mlx90640"
 version = "0.1.0"
 edition = "2021"
 
