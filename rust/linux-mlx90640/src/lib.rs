@@ -83,9 +83,9 @@ const AUX_DATA_START_ADDRESS: u16 = 0x0700;
 const EE_PROM_START_ADDRESS: u16 = 0x2400;
 
 const FRAME_SIZE: usize = 834;
-const TOT_PIXELS: usize = 768;
-const TOT_COLUMNS: usize = 32;
-const TOT_ROWS: usize = 24;
+pub const TOT_PIXELS: usize = 768;
+pub const TOT_COLUMNS: usize = 32;
+pub const TOT_ROWS: usize = 24;
 const SCALE_ALPHA: f32 = 0.000001;
 
 const FRAME_DATA_ERROR: i32 = -8;

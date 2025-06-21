@@ -1,0 +1,13 @@
+[package]
+name = "camera-ws-stream"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tungstenite = "0.21"
+rand = "0.8"
+bytemuck = "1.22.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+linux-mlx90640 = { path = "../linux-mlx90640" }

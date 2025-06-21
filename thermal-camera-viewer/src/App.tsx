@@ -8,7 +8,7 @@ function App() {
 
     useEffect(() => {
 
-        const thermalCameraSocket = new WebSocket("ws://10.0.0.93:8080/stream")
+        const thermalCameraSocket = new WebSocket("ws://10.0.0.113:8080")
 
         setSocketStatus(<h3>Connecting to ws...</h3>)
 
