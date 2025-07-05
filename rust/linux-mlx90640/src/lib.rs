@@ -403,8 +403,6 @@ impl ParamsMlx {
         self.extract_cilc_parameters(&eeprom_data);
         self.extract_deviating_pixels(&eeprom_data);
         self.alpha_scale = 10u8;
-        self.il_chess_c[1] = 3.5;
-        self.il_chess_c[2] = 0.125;
     }
 
     fn extract_vdd_parameters(&mut self, eeprom_data: &[u16]) {
@@ -800,8 +798,8 @@ impl ParamsMlx {
 
         self.calibration_mode_ee = calibration_mode_ee;
         self.il_chess_c[0] = il_chess_c[0];
-        self.il_chess_c[1] = il_chess_c[0];
-        self.il_chess_c[2] = il_chess_c[0];
+        self.il_chess_c[1] = il_chess_c[1];
+        self.il_chess_c[2] = il_chess_c[2];
     }
 
     fn extract_deviating_pixels(&mut self, ee_data: &[u16]) -> i32 {
