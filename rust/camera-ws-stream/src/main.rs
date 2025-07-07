@@ -1,7 +1,5 @@
 use std::net::TcpListener;
 use std::thread;
-use std::time::Duration;
-use rand::Rng;
 use serde::Serialize;
 use serde_json::to_string;
 use tungstenite::{accept, Message};
@@ -17,7 +15,7 @@ fn main() {
     println!("WebSocket server listening on ws://0.0.0.0:8080");
 
     for stream in server.incoming() {
-        thread::spawn(move || {
+        thread::spawn(|| {
             let mut websocket = accept(stream.unwrap()).unwrap();
             let mut camera = ThermalCamera::default();
             loop {
@@ -32,17 +30,6 @@ fn main() {
                     }
                 }
                 
-                // MOCK
-                // Generate a 32x24 matrix of f32 values
-                // let mut rng = rand::thread_rng();
-                // let matrix: Vec<Vec<f32>> = (0..TOT_ROWS)
-                //     .map(|_| {
-                //         (0..TOT_COLUMNS)
-                //             .map(|_| rng.gen_range(0.0..50.0))
-                //             .collect()
-                //     })
-                //     .collect();
-                
                 // // Serialize to JSON
                 let message = ThermalMessage { thermalFrame: matrix };
                 let json = to_string(&message).unwrap();
@@ -51,9 +38,6 @@ fn main() {
                     eprintln!("Client disconnected or error: {}", e);
                     break;
                 }
-
-                // MOCK 
-                // thread::sleep(Duration::from_millis(100));
             }
         });
     }

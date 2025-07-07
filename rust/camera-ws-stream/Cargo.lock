@@ -47,7 +47,6 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "linux-mlx90640",
- "rand",
  "serde",
  "serde_json",
  "tungstenite",

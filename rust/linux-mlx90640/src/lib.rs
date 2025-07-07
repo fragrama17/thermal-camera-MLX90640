@@ -109,9 +109,7 @@ impl ThermalCamera {
         let mut frame_data = [0u16; FRAME_SIZE];
         let mut frame = [0.0f32; TOT_PIXELS];
 
-        for i in 0..2 { // first sub-page 0, then sub-page 1
-            println!("getting sub-page {}", i);
-            // Fetch the frame data asynchronously
+        for _i in 0..2 {
             let status = self.get_frame_data(&mut frame_data);
 
             if status < 0 {
