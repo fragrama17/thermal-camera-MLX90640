@@ -2,7 +2,7 @@
 This repo contains drivers to interface MLX90640 infra-red array sensor in order to get current the thermal frame and configure certain parameters.
 
 ### Demo
-There's a minimal [React App](thermal-camera-viewer/README.md) for receiving frame through [websocket](dotnet/ThermalCameraMlx90640/ThermalCameraStream/Program.cs) and for rendering the thermal frame using a **canvas**
+There's a minimal [React App](thermal-camera-viewer) for receiving frame through [websocket](rust/camera-ws-stream) and for rendering the thermal frame using a **canvas**
 ![Demo](rust-thermal-viewer.gif)
 
 ## Content List
