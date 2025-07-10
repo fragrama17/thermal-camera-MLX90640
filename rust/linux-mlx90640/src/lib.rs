@@ -12,7 +12,7 @@ mod i2c_utils;
 pub struct ThermalCamera {
     address: u16,
     device: LinuxI2CDevice,
-    pub params_mlx: ParamsMlx,
+    params_mlx: ParamsMlx,
 }
 
 /**

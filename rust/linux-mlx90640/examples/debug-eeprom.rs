@@ -4,6 +4,7 @@ fn main() {
 
     let cam = ThermalCamera::default();
 
-    println!("{:?}", cam.params_mlx);
+    // make params_mlx in order to test this example
+    // println!("{:?}", cam.params_mlx);
 
 }
