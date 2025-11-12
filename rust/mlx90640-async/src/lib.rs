@@ -1,5 +1,14 @@
-use std::io;
-use std::io::Error;
+#![no_std]
+
+use defmt::*;
+
+use core::convert::TryFrom;
+use core::default::Default;
+use core::result::Result;
+use embassy_time::Timer;
+use embedded_hal_async::i2c::ErrorKind;
+use libm::{powf, sqrtf, floorf};
+
 use crate::i2c_utils::{read_word_from_register, read_words_from_register, write_word_to_register};
 
 mod i2c_utils;
@@ -29,7 +38,6 @@ where
     params_mlx: ParamsMlx,
 }
 
-#[derive(Debug, Clone, Copy)]
 pub enum RefreshRate {
     /**
      * Available frame every 4s
@@ -92,7 +100,8 @@ where
         I2c: embedded_hal_async::i2c::I2c,
     {
         let mut params_mlx = ParamsMlx::default();
-        params_mlx.init_parameters(&mut device, address);
+        // debug!("initiating mlx params...");
+        // params_mlx.init_parameters(&mut device, address).await;
 
         Self {
             address,
@@ -101,7 +110,7 @@ where
         }
     }
 
-    pub async fn get_image(&mut self) -> Result<[f32; TOT_PIXELS], Error> {
+    pub async fn get_image(&mut self) -> Result<[f32; TOT_PIXELS], ErrorKind> {
         let emissivity = 0.95;
         let mut frame_data = [0u16; FRAME_SIZE];
         let mut frame = [0.0f32; TOT_PIXELS];
@@ -110,7 +119,7 @@ where
             let status = self.get_frame_data(&mut frame_data).await;
 
             if status < 0 {
-                return Err(Error::new(io::ErrorKind::Other, "error while getting data frame"));
+                return Err(ErrorKind::Other);
             }
 
             let tr = self.get_ta(&frame_data) - 8.0;
@@ -207,9 +216,10 @@ where
         tr4 *= tr4;
         let ta_tr = tr4 - (tr4 - ta4) / emissivity;
 
-        let kta_scale = 2.0f32.powf(self.params_mlx.kta_scale as f32);
-        let kv_scale = 2.0f32.powf(self.params_mlx.kv_scale as f32);
-        let alpha_scale = 2.0f32.powf(self.params_mlx.alpha_scale as f32);
+        let two = 2.0f32;
+        let kta_scale = powf(two, self.params_mlx.kta_scale as f32);
+        let kv_scale = powf(two, self.params_mlx.kv_scale as f32);
+        let alpha_scale = powf(two, self.params_mlx.alpha_scale as f32);
 
         alpha_corr_r[0] = 1.0 / (1.0 + self.params_mlx.ks_to[0] * 40.0);
         alpha_corr_r[1] = 1.0;
@@ -257,10 +267,10 @@ where
             let mut alpha_compensated = SCALE_ALPHA * alpha_scale / self.params_mlx.alpha[pixel_number] as f32;
             alpha_compensated *= 1.0 + self.params_mlx.ks_ta * (ta - 25.0);
 
-            let mut sx = alpha_compensated.powi(3) * (ir_data + alpha_compensated * ta_tr);
-            sx = sx.sqrt().sqrt() * self.params_mlx.ks_to[1];
+            let mut sx = powf(alpha_compensated, 3f32) * (ir_data + alpha_compensated * ta_tr);
+            sx = sqrtf(sqrtf(sx)) * self.params_mlx.ks_to[1];
 
-            let mut to = (ir_data / (alpha_compensated * (1.0 - self.params_mlx.ks_to[1] * 273.15) + sx) + ta_tr).sqrt().sqrt() - 273.15;
+            let mut to = sqrtf(sqrtf(ir_data / (alpha_compensated * (1.0 - self.params_mlx.ks_to[1] * 273.15) + sx) + ta_tr)) - 273.15;
 
             let range = if to < self.params_mlx.ct[1] as f32 {
                 0
@@ -272,7 +282,7 @@ where
                 3
             };
 
-            to = (ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - self.params_mlx.ct[range] as f32))) + ta_tr).sqrt().sqrt() - 273.15;
+            to = sqrtf(sqrtf((ir_data / (alpha_compensated * alpha_corr_r[range] * (1.0 + self.params_mlx.ks_to[range] * (to - self.params_mlx.ct[range] as f32))) + ta_tr))) - 273.15;
 
             result[pixel_number] = to;
         }
@@ -283,7 +293,7 @@ where
         let ptat = frame_data[800] as i16;
 
         let ptat_art = (
-            (ptat as f32) / ((ptat as f32 * self.params_mlx.alpha_ptat) + (frame_data[768] as i16 as f32)) * 2f32.powf(18.0)
+            (ptat as f32) / ((ptat as f32 * self.params_mlx.alpha_ptat) + (frame_data[768] as i16 as f32)) * powf(2f32, 18.0)
         ) as i16 as f32;
 
         let mut ta = ptat_art / (1.0 + self.params_mlx.kv_ptat * (vdd - 3.3)) - (self.params_mlx.vp_tat25 as f32);
@@ -297,7 +307,7 @@ where
         let vdd = frame_data[810] as i16;
 
         let resolution_ram: i32 = ((frame_data[832] & 0x0C00) >> 10) as i32;
-        let resolution_correction = (2f32.powf(self.params_mlx.resolution_ee as f32)) / 2f32.powf(resolution_ram as f32);
+        let resolution_correction = powf(2f32, self.params_mlx.resolution_ee as f32) / powf(2f32, resolution_ram as f32);
 
         (resolution_correction * (vdd as f32) - (self.params_mlx.vdd25 as f32)) / self.params_mlx.k_vdd as f32 + 3.3
     }
@@ -308,6 +318,8 @@ where
         let sub_page1check = 0x11;
 
         write_word_to_register(&mut self.device, self.address, STATUS_REGISTER, init_word).await;
+
+        Timer::after_millis(1).await;
 
         let data_check = read_word_from_register(&mut self.device, self.address, STATUS_REGISTER).await;
         if data_check == sub_page0check || data_check == sub_page1check {
@@ -395,7 +407,7 @@ impl ParamsMlx {
         kt_ptat /= 8.0;
 
         let v_ptat25 = ee_data[49];
-        let alpha_ptat = ((ee_data[16] & 0xF000) as f32 / 2f32.powf(14.0)) + 8.0;
+        let alpha_ptat = ((ee_data[16] & 0xF000) as f32 / powf(2f32, 14.0)) + 8.0;
 
         self.kv_ptat = kv_ptat;
         self.kt_ptat = kt_ptat;
@@ -494,7 +506,7 @@ impl ParamsMlx {
                     (acc_row[i] << acc_row_scale) as f32 +
                     (acc_column[j] << acc_column_scale) as f32 +
                     alpha_temp[p];
-                alpha_temp[p] /= f32::powf(2.0, 4.0);
+                alpha_temp[p] /= powf(2.0, 4.0);
                 alpha_temp[p] -= self.tgc * (self.cp_alpha[0] + self.cp_alpha[1]) / 2.0;
                 alpha_temp[p] = SCALE_ALPHA / alpha_temp[p];
             }
@@ -514,7 +526,7 @@ impl ParamsMlx {
         }
 
         for i in 0..TOT_PIXELS {
-            temp = alpha_temp[i] * f32::powf(2.0, alpha_scale as f32);
+            temp = alpha_temp[i] * powf(2.0, alpha_scale as f32);
             self.alpha[i] = (temp + 0.5) as u16;
         }
 
@@ -597,7 +609,7 @@ impl ParamsMlx {
 
                 temp_val *= (1 << kta_scale2) as f32;
                 temp_val = kta_rc[split] as f32 + temp_val;
-                kta_temp[p] = temp_val / 2f32.powi(kta_scale1 as i32);
+                kta_temp[p] = temp_val / powf(2f32, kta_scale1 as f32);
             }
         }
 
@@ -616,11 +628,11 @@ impl ParamsMlx {
         }
 
         for i in 0..TOT_PIXELS {
-            let val = kta_temp[i] * 2f32.powi(kta_scale1 as i32);
+            let val = kta_temp[i] * powf(2f32, kta_scale1 as f32);
             self.kta[i] = if val < 0.0 {
-                (val - 0.5).floor() as i8
+                floorf(val - 0.5) as i8
             } else {
-                (val + 0.5).floor() as i8
+                floorf(val + 0.5) as i8
             };
         }
 
@@ -662,7 +674,7 @@ impl ParamsMlx {
                 let p = 32 * i + j;
                 let split = 2 * ((p / 32) - (p / 64) * 2) + (p % 2);
                 kv_temp[p] = kv_t[split] as f32;
-                kv_temp[p] /= 2f32.powi(kv_scale as i32);
+                kv_temp[p] /= powf(2f32, kv_scale as f32);
             }
         }
 
@@ -681,7 +693,7 @@ impl ParamsMlx {
         }
 
         for i in 0..TOT_PIXELS {
-            temp = kv_temp[i] * 2f32.powi(kv_scale as i32);
+            temp = kv_temp[i] * powf(2f32, kv_scale as f32);
             self.kv[i] = if temp < 0.0 {
                 (temp - 0.5) as i8
             } else {
@@ -714,7 +726,7 @@ impl ParamsMlx {
             alpha_sp[0] -= 1024.0;
         }
 
-        alpha_sp[0] /= 2f32.powi(alpha_scale as i32);
+        alpha_sp[0] /= powf(2f32, alpha_scale as f32);
 
         alpha_sp[1] = ((ee_data[57] & 0xFC00) >> 10) as f32;
         if alpha_sp[1] > 31.0 {
@@ -726,12 +738,12 @@ impl ParamsMlx {
         let cp_kta = (ee_data[59] & 0x00FF) as i8;
 
         let kta_scale1: i32 = (((ee_data[56] & 0x00F0) >> 4) + 8) as i32;
-        self.cp_kta = cp_kta as f32 / 2f32.powi(kta_scale1);
+        self.cp_kta = cp_kta as f32 / powf(2f32, kta_scale1 as f32);
 
         let cp_kv = ((ee_data[59] & 0xFF00) >> 8) as i8;
 
         let kv_scale = ((ee_data[56] & 0x0F00) >> 8) as i32;
-        self.cp_kv = cp_kv as f32 / 2f32.powi(kv_scale);
+        self.cp_kv = cp_kv as f32 / powf(2f32, kv_scale as f32);
 
         self.cp_alpha[0] = alpha_sp[0];
         self.cp_alpha[1] = alpha_sp[1];
