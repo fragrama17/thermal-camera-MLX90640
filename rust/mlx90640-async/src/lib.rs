@@ -1,13 +1,16 @@
 #![no_std]
 
-use defmt::*;
-
 use core::convert::TryFrom;
 use core::default::Default;
+use core::fmt::Write;
+use core::marker::PhantomData;
 use core::result::Result;
-use embassy_time::Timer;
-use embedded_hal_async::i2c::ErrorKind;
-use libm::{powf, sqrtf, floorf};
+
+use defmt::*;
+use embedded_hal::i2c::ErrorKind;
+use embedded_hal_async::i2c::I2c as I2cAsync;
+use embedded_hal::i2c::I2c as I2cBlocking;
+use libm::{floorf, powf, sqrtf};
 
 use crate::i2c_utils::{read_word_from_register, read_words_from_register, write_word_to_register};
 
@@ -29,13 +32,12 @@ const SCALE_ALPHA: f32 = 0.000001;
 
 const FRAME_DATA_ERROR: i32 = -8;
 
-pub struct ThermalCamera<I2c>
-where
-    I2c: embedded_hal_async::i2c::I2c,
+pub struct ThermalCamera<I2c: embedded_hal_async::i2c::I2c, Delay>
 {
     address: u8,
     device: I2c,
-    params_mlx: ParamsMlx,
+    delay: Delay,
+    pub params_mlx: ParamsMlx,
 }
 
 pub enum RefreshRate {
@@ -91,21 +93,18 @@ impl TryFrom<u8> for RefreshRate {
     }
 }
 
-impl<I2c> ThermalCamera<I2c>
-where
-    I2c: embedded_hal_async::i2c::I2c,
+impl<I2c: embedded_hal_async::i2c::I2c, Delay: embedded_hal_async::delay::DelayNs> ThermalCamera<I2c, Delay>
 {
-    pub fn new(address: u8, mut device: I2c) -> Self
-    where
-        I2c: embedded_hal_async::i2c::I2c,
+    pub async fn new(address: u8, mut device: I2c, delay: Delay) -> Self
     {
         let mut params_mlx = ParamsMlx::default();
-        // debug!("initiating mlx params...");
-        // params_mlx.init_parameters(&mut device, address).await;
+        debug!("initiating mlx params...");
+        params_mlx.init_parameters(&mut device, address).await;
 
         Self {
             address,
             device,
+            delay,
             params_mlx,
         }
     }
@@ -115,7 +114,7 @@ where
         let mut frame_data = [0u16; FRAME_SIZE];
         let mut frame = [0.0f32; TOT_PIXELS];
 
-        for _i in 0..2 {
+        for i in 0..2 {
             let status = self.get_frame_data(&mut frame_data).await;
 
             if status < 0 {
@@ -126,6 +125,8 @@ where
 
             // Calculate To for pixels
             self.calculate_to(&frame_data, emissivity, tr, &mut frame);
+
+            debug!("frame {} successfully extracted", i);
         }
 
         Ok(frame)
@@ -185,7 +186,7 @@ where
         write_word_to_register(&mut self.device, self.address, CONTROL_REGISTER, new_control_word).await;
     }
 
-    fn validate_frame_data(frame_data: &[u16; 834]) -> i32 {
+    fn validate_frame_data(frame_data: &[u16; FRAME_SIZE]) -> i32 {
         let mut line = 0;
 
         for i in (0..TOT_PIXELS).step_by(TOT_COLUMNS)
@@ -200,7 +201,7 @@ where
         return 0;
     }
 
-    fn calculate_to(&mut self, frame_data: &[u16], emissivity: f32, tr: f32, result: &mut [f32]) {
+    fn calculate_to(&mut self, frame_data: &[u16; FRAME_SIZE], emissivity: f32, tr: f32, result: &mut [f32; TOT_PIXELS]) {
         let mut ir_data_cp = [0.0f32; 2];
         let mut alpha_corr_r = [0.0f32; 4];
 
@@ -225,6 +226,16 @@ where
         alpha_corr_r[1] = 1.0;
         alpha_corr_r[2] = 1.0 + self.params_mlx.ks_to[1] * (self.params_mlx.ct[2] as f32);
         alpha_corr_r[3] = alpha_corr_r[2] * (1.0 + self.params_mlx.ks_to[2] * (self.params_mlx.ct[3] - self.params_mlx.ct[2]) as f32);
+
+        for i in 0..100 {
+            debug!("start data frame at index {} is {}", i, frame_data[i]);
+        }
+
+        // for i in 750..FRAME_SIZE {
+        //     debug!("end data frame at index {} is {}", i, frame_data[i]);
+        // }
+
+        debug!("the bastard frame_data[778] here is {}", frame_data[778]);
 
         let gain = ((self.params_mlx.gain_ee) / frame_data[778] as i16) as f32;
 
@@ -319,7 +330,7 @@ where
 
         write_word_to_register(&mut self.device, self.address, STATUS_REGISTER, init_word).await;
 
-        Timer::after_millis(1).await;
+        self.delay.delay_ms(1).await;
 
         let data_check = read_word_from_register(&mut self.device, self.address, STATUS_REGISTER).await;
         if data_check == sub_page0check || data_check == sub_page1check {
@@ -361,9 +372,7 @@ pub struct ParamsMlx {
 }
 
 impl ParamsMlx {
-    pub async fn init_parameters<I2c>(&mut self, device: &mut I2c, address: u8)
-    where
-        I2c: embedded_hal_async::i2c::I2c,
+    pub async fn init_parameters<I2c: I2cAsync>(&mut self, device: &mut I2c, address: u8)
     {
         let mut eeprom_data = [0u16; 832];
         read_words_from_register::<I2c, 832>(device, address, EE_PROM_START_ADDRESS, &mut eeprom_data).await;
@@ -862,6 +871,12 @@ impl ParamsMlx {
 
         0
     }
+
+    pub fn to_string(&self) -> heapless::String<500> {
+        let mut buf = heapless::String::<500>::new();
+        core::write!(buf, "Params: alpha-scale: {}, kv-scale: {}, alpha_ptat: {}, resolution-ee: {}, gain-ee: {}, k-vdd: {}", self.alpha_scale, self.kv_scale, self.alpha_ptat, self.resolution_ee, self.gain_ee, self.k_vdd).unwrap();
+        buf
+    }
 }
 
 impl Default for ParamsMlx {
@@ -896,4 +911,47 @@ impl Default for ParamsMlx {
             outlier_pixels: [0; 5],
         }
     }
+}
+
+trait SealedMode {}
+
+trait Mode: SealedMode {}
+
+macro_rules! impl_mode {
+    ($name:ident) => {
+        impl SealedMode for $name {}
+        impl Mode for $name {}
+    };
+}
+
+struct Blocking;
+struct Async;
+
+impl_mode!(Blocking);
+impl_mode!(Async);
+
+pub struct Device<'d, I2c, M: Mode> {
+    phantom: PhantomData<(&'d I2c, M)>,
+    device: I2c,
+}
+
+impl<'d, I2c: I2cAsync> Device<'d, I2c, Async> {
+    pub fn new_async(device: I2c) -> Self {
+        Self {
+            phantom: PhantomData,
+            device
+        }
+    }
+
+    pub fn do_async(&self) {}
+}
+
+impl<'d, I2c: I2cBlocking> Device<'d, I2c, Blocking> {
+    pub fn new_blocking(device: I2c) -> Self {
+        Self {
+            phantom: PhantomData,
+            device
+        }
+    }
+    pub fn do_blocking(&self) {}
 }

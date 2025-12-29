@@ -1,9 +1,9 @@
 use std::time::Instant;
-use linux_mlx90640::ThermalCamera;
+use linux_mlx90640::{RefreshRate, ThermalCamera};
 
 fn main() {
     let mut camera = ThermalCamera::default();
-
+    camera.set_refresh_rate(RefreshRate::_16Hz);
     loop {
         let start = Instant::now();
         match camera.get_image() {
