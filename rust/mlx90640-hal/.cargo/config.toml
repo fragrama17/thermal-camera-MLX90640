@@ -1,0 +1,6 @@
+# compile for arm32
+[target.armv7-unknown-linux-gnueabihf]
+linker = "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-linux-gnueabihf\\13.3 rel1\\bin\\arm-none-linux-gnueabihf-gcc.exe"
+
+[build]
+target = "armv7-unknown-linux-gnueabihf" # so that compiler knows it's a linux target
