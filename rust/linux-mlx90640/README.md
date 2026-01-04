@@ -1,3 +1,7 @@
+## (deprecated)
+### This create has been replaced with a generic hal [here](../mlx90640-hal)
+<strike>
+
 # Linux MLX90640
 A rust driver to easily interface mlx90640, running on linux arm32/64 using the linux I²C api.
 
@@ -47,3 +51,4 @@ Then run:
 ```shell
 cargo build --release --examples
 ```
+</strike>

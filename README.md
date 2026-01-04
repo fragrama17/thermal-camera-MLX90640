@@ -5,11 +5,9 @@ This repo contains drivers to interface MLX90640 infra-red array sensor in order
 There's a minimal [React App](thermal-camera-viewer) for receiving frame through [websocket](rust/camera-ws-stream) and for rendering the thermal frame using a **canvas**
 ![Demo](rust-thermal-viewer.gif)
 
-## Content List
-* [MLX90640 datasheet](docs/MLX90640-Datasheet-Melexis.pdf)
-* [MLX90640 driver documentation](docs/MLX90640%20driver.pdf)
-* [.NET driver](dotnet/ThermalCameraMlx90640/ThermalCameraMlx90640) (using the Microsoft IoT I²C driver )
-* [Rust driver](rust/linux-mlx90640) (using the Linux I²C driver thanks to [rust-i2cdev](https://github.com/rust-embedded/rust-i2cdev))
+### Drivers List
+* [.NET driver](dotnet/ThermalCameraMlx90640/ThermalCameraMlx90640) (using the IoT I²C wrapper )
+* [Rust driver](rust/mlx90640-hal) (can run potentially everywhere thanks to this `no_std` implementation)
 
 ### Current limitations on .Net
 - refresh-rate limited to 4Hz due to inexplicable huge delay (150ms) when reading from RAM registers:

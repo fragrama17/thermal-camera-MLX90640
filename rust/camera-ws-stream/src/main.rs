@@ -1,9 +1,10 @@
 use std::net::TcpListener;
 use std::thread;
+use linux_embedded_hal::{Delay, I2cdev};
 use serde::Serialize;
 use serde_json::to_string;
 use tungstenite::{accept, Message};
-use linux_mlx90640::{ThermalCamera, TOT_COLUMNS, TOT_ROWS};
+use mlx90640_hal::{Mlx90640, TOT_COLUMNS, TOT_ROWS};
 
 #[derive(Serialize)]
 struct ThermalMessage {
@@ -17,12 +18,11 @@ fn main() {
     for stream in server.incoming() {
         thread::spawn(|| {
             let mut websocket = accept(stream.unwrap()).unwrap();
-            let mut camera = ThermalCamera::default();
+            let i2c = I2cdev::new("/dev/i2c-1").unwrap();
+            let mut camera = Mlx90640::new(0x33, i2c, Delay);
             loop {
-                // Get thermal data from mock service
                 let flat_matrix = camera.get_image().unwrap();
 
-                // Convert flat to 2D matrix
                 let mut matrix = vec![vec![0.0f32; TOT_COLUMNS]; TOT_ROWS];
                 for y in 0..TOT_ROWS {
                     for x in 0..TOT_COLUMNS {
@@ -30,7 +30,6 @@ fn main() {
                     }
                 }
                 
-                // // Serialize to JSON
                 let message = ThermalMessage { thermalFrame: matrix };
                 let json = to_string(&message).unwrap();
 
